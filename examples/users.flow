@@ -1,0 +1,16 @@
+# Fetch users from API, keep adults, summarize, save report.
+when start
+  http_get url="https://api.example.com/users" -> users
+  filter from=users where="x['age'] >= 18" -> adults
+  count of=adults -> n
+
+  if n > 0
+    summarize input=adults -> summary
+    write file=report.txt text=summary
+    print value="saved"
+  else
+    print value="no adults"
+
+  each user in adults
+    format template="hi {name}, age {age}" data=user -> msg
+    print value=msg

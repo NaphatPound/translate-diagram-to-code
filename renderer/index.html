@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Flow — Block Renderer</title>
+<style>
+  :root {
+    --bg-editor: #1e1e2e;
+    --bg-preview: #f4f4f7;
+    --bg-compile: #0f172a;
+    --fg-editor: #d4d4d8;
+    --fg-compile: #e2e8f0;
+    --c-io:   #6b7280;
+    --c-data: #2563eb;
+    --c-math: #16a34a;
+    --c-text: #9333ea;
+    --c-time: #d97706;
+    --c-net:  #dc2626;
+    --c-ai:   #db2777;
+    --c-ctrl: #f59e0b;
+    --c-when: #facc15;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+         margin: 0; height: 100vh; display: flex; }
+  .pane { flex: 1; padding: 16px; overflow: auto; min-width: 0; }
+  .palette { flex: 0 0 220px; background: #fafafa;
+             border-right: 1px solid #e5e7eb; }
+  .palette h3 { margin: 0 0 8px; font-size: 13px;
+                text-transform: uppercase; letter-spacing: 1px; opacity: .7; }
+  .palette .cat-group { margin-bottom: 12px; }
+  .palette .cat-label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
+    opacity: .55; margin: 6px 0 4px;
+  }
+  .palette .chip {
+    display: block; padding: 4px 8px; margin: 2px 0;
+    border-radius: 4px 10px 10px 4px; cursor: pointer;
+    color: #fff; font-size: 11px; user-select: none;
+    transition: transform .08s;
+  }
+  .palette .chip:hover  { transform: translateX(2px); }
+  .palette .chip:active { transform: scale(.98); }
+  .palette .chip .verb-name { font-weight: 700; }
+  .editor { background: var(--bg-editor); color: var(--fg-editor); }
+  .editor h3, .preview h3 { margin: 0 0 8px; font-size: 13px;
+                            text-transform: uppercase; letter-spacing: 1px; opacity: .7; }
+  .editor textarea {
+    width: 100%; height: calc(100% - 70px); resize: none; border: 0; outline: 0;
+    background: transparent; color: inherit; font: inherit; line-height: 1.5;
+    tab-size: 2;
+  }
+  .editor .toolbar {
+    display: flex; gap: 6px; align-items: center; margin-bottom: 6px;
+    font-size: 11px;
+  }
+  .editor .toolbar select, .editor .toolbar button {
+    background: rgba(255,255,255,.08); color: var(--fg-editor);
+    border: 1px solid rgba(255,255,255,.12); padding: 4px 8px;
+    border-radius: 4px; font: inherit; font-size: 11px; cursor: pointer;
+  }
+  .editor .toolbar select:hover, .editor .toolbar button:hover {
+    background: rgba(255,255,255,.14);
+  }
+  .editor .toolbar input[type=file] { display: none; }
+  .preview { background: var(--bg-preview); color: #222; }
+  .preview .error { color: #b91c1c; background: #fee2e2; padding: 6px 10px;
+                    border-radius: 4px; margin: 4px 0; font-size: 13px; }
+
+  /* Compile pane */
+  .compile { background: var(--bg-compile); color: var(--fg-compile); }
+  .compile h3 { margin: 0 0 8px; font-size: 13px;
+                text-transform: uppercase; letter-spacing: 1px; opacity: .7; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 8px; }
+  .tab { padding: 4px 12px; cursor: pointer; border-radius: 4px;
+         opacity: .55; font-size: 12px; user-select: none;
+         background: rgba(255,255,255,.04); }
+  .tab:hover { opacity: .85; }
+  .tab.active { background: rgba(255,255,255,.14); opacity: 1; }
+  .compile pre { white-space: pre-wrap; word-break: break-word;
+                 font: 12px/1.5 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+                 margin: 0; padding: 0; }
+  .compile .error { background: #7f1d1d; color: #fecaca; padding: 10px;
+                    border-radius: 4px; font-size: 12px; white-space: pre-wrap; }
+  .compile .hint  { color: #94a3b8; font-size: 12px; padding: 10px;
+                    background: rgba(255,255,255,.03); border-radius: 4px;
+                    border: 1px dashed rgba(255,255,255,.08); }
+
+  /* Block click affordance */
+  .preview .block { cursor: pointer; }
+  .preview .block:hover { outline: 2px solid rgba(0,0,0,.18); }
+
+  /* Edit modal */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.45);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 1000;
+  }
+  .modal {
+    background: #fff; border-radius: 8px; padding: 20px;
+    min-width: 420px; max-width: 640px; color: #1f2937;
+    font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+    box-shadow: 0 20px 60px rgba(0,0,0,.3);
+  }
+  .modal h4 { margin: 0 0 4px; font-size: 14px; }
+  .modal .hint-line {
+    font-size: 11px; color: #6b7280; margin: 0 0 12px;
+  }
+  .modal .field {
+    display: grid; grid-template-columns: 100px 1fr; gap: 8px;
+    align-items: center; margin: 6px 0;
+  }
+  .modal .field label { font-size: 12px; opacity: .8; }
+  .modal .field input {
+    padding: 5px 8px; font: inherit; font-size: 12px;
+    border: 1px solid #d1d5db; border-radius: 4px; min-width: 0;
+  }
+  .modal .field input:focus { border-color: #2563eb; outline: 0; }
+  .modal .buttons {
+    margin-top: 16px; display: flex; gap: 8px; justify-content: flex-end;
+  }
+  .modal button {
+    padding: 6px 14px; border: 0; border-radius: 4px;
+    font: inherit; font-size: 12px; cursor: pointer;
+  }
+  .modal .primary { background: #2563eb; color: #fff; }
+  .modal .secondary { background: #e5e7eb; }
+  .hidden { display: none !important; }
+
+  /* Action block (stack) */
+  .block {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 10px 6px 14px; margin: 3px 0;
+    color: #fff; font-size: 13px;
+    border-radius: 4px 14px 14px 4px;
+    box-shadow: 0 1px 0 rgba(0,0,0,.12), 0 2px 4px rgba(0,0,0,.06);
+    position: relative;
+  }
+  .block::before {
+    content: ''; position: absolute; left: -1px; top: 50%;
+    width: 8px; height: 8px; transform: translateY(-50%);
+    background: inherit; border-radius: 50%;
+  }
+  .verb { font-weight: 700; }
+  .arg, .out, .cond {
+    background: rgba(255,255,255,.22); padding: 1px 7px;
+    border-radius: 10px; font-size: 12px;
+  }
+  .out { background: rgba(0,0,0,.28); }
+  .arg b { font-weight: 500; opacity: .85; }
+
+  /* Category colors */
+  .cat-io   { background: var(--c-io); }
+  .cat-data { background: var(--c-data); }
+  .cat-math { background: var(--c-math); }
+  .cat-text { background: var(--c-text); }
+  .cat-time { background: var(--c-time); }
+  .cat-net  { background: var(--c-net); }
+  .cat-ai   { background: var(--c-ai); }
+  .cat-ctrl { background: var(--c-ctrl); }
+  .cat-when { background: var(--c-when); color: #1f2937; }
+
+  /* C-block wrapper (if / each / repeat) */
+  .cblock {
+    border-left: 4px solid currentColor; padding: 2px 0 2px 10px;
+    margin: 4px 0;
+    --col: var(--c-ctrl);
+    color: var(--col);
+  }
+  .cblock-head { display: block; }
+  .cblock-body { margin-left: 12px; color: #222; }
+  .cblock-else { display: block; margin-top: 4px; }
+
+  .cblock.kind-each   { --col: var(--c-data); }
+  .cblock.kind-repeat { --col: var(--c-ctrl); }
+  .cblock.kind-if     { --col: var(--c-ctrl); }
+  .cblock.kind-when   { --col: var(--c-when); }
+
+  /* Hat block: rounded top */
+  .hat .block { border-radius: 14px 14px 14px 4px; }
+  .hat .block::before { display: none; }
+</style>
+</head>
+<body>
+  <div class="pane palette">
+    <h3>Palette</h3>
+    <div id="palette"></div>
+  </div>
+  <div class="pane editor">
+    <h3>Flow source</h3>
+    <div class="toolbar">
+      <select id="examples-select" title="Load example">
+        <option value="">— example —</option>
+      </select>
+      <button id="btn-download" title="Download as .flow">Download</button>
+      <button id="btn-upload" title="Open a .flow file">Upload</button>
+      <input type="file" id="upload-input" accept=".flow,text/plain"/>
+    </div>
+    <textarea id="src" spellcheck="false"></textarea>
+  </div>
+  <div class="pane preview">
+    <h3>Block view</h3>
+    <div id="out"></div>
+  </div>
+  <div class="pane compile">
+    <h3>Compiled</h3>
+    <div class="tabs">
+      <span class="tab active" data-lang="python">Python</span>
+      <span class="tab" data-lang="js">JS</span>
+      <span class="tab" data-lang="go">Go</span>
+      <span class="tab" data-lang="rust">Rust</span>
+      <span class="tab" data-lang="bash">Bash</span>
+    </div>
+    <div id="compiled-wrap"></div>
+  </div>
+  <div id="modal-root" class="hidden"></div>
+
+<script>
+// ---------------- verb → category ----------------
+const CAT = {
+  read:'io', write:'io', print:'io', ask:'io', load:'io', save:'io',
+  filter:'data', map:'data', sort:'data', take:'data', skip:'data',
+  count:'data', join:'data', split:'data',
+  add:'math', sub:'math', mul:'math', div:'math', sum:'math', avg:'math',
+  min:'math', max:'math', round:'math',
+  format:'text', upper:'text', lower:'text', trim:'text',
+  replace:'text', contains:'text',
+  now:'time', today:'time', wait:'time',
+  http_get:'net', http_post:'net', download:'net',
+  ask_ai:'ai', classify:'ai', summarize:'ai', translate:'ai',
+};
+
+const esc = s => String(s).replace(/[&<>"]/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+// ---------------- mini parser (line-based) ----------------
+function stripComment(line) {
+  let out = '', inStr = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i], p = line[i - 1];
+    if (c === '"' && p !== '\\') inStr = !inStr;
+    if (c === '#' && !inStr) break;
+    out += c;
+  }
+  return out;
+}
+
+function tokenizeArgs(s) {
+  const out = []; let cur = ''; let inStr = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i], p = s[i - 1];
+    if (c === '"' && p !== '\\') { inStr = !inStr; cur += c; continue; }
+    if (/\s/.test(c) && !inStr) { if (cur) { out.push(cur); cur = ''; } continue; }
+    cur += c;
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
+function parseLine(line, lineNo) {
+  const raw = stripComment(line);
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  if (trimmed === 'else') return { type: 'else', lineNo };
+  if (trimmed.startsWith('if ')) {
+    return { type: 'if', cond: trimmed.slice(3).trim(), lineNo };
+  }
+  if (trimmed.startsWith('each ')) {
+    const m = trimmed.match(/^each\s+(\w+)\s+in\s+(.+)$/);
+    return m ? { type: 'each', var: m[1], iter: m[2].trim(), lineNo }
+             : { type: 'error', msg: "each must be: each <name> in <value>", lineNo };
+  }
+  if (trimmed.startsWith('repeat ')) {
+    return { type: 'repeat', count: trimmed.slice(7).trim(), lineNo };
+  }
+  if (trimmed.startsWith('when ')) {
+    return { type: 'when', event: trimmed.slice(5).trim(), lineNo };
+  }
+
+  // call
+  let body = trimmed; let out = null;
+  // Find -> outside of quotes
+  let arrow = -1, inStr = false;
+  for (let i = 0; i < body.length - 1; i++) {
+    if (body[i] === '"' && body[i - 1] !== '\\') inStr = !inStr;
+    if (!inStr && body[i] === '-' && body[i + 1] === '>') { arrow = i; break; }
+  }
+  if (arrow >= 0) { out = body.slice(arrow + 2).trim(); body = body.slice(0, arrow).trim(); }
+
+  const tokens = tokenizeArgs(body);
+  if (!tokens.length) return { type: 'error', msg: 'empty statement', lineNo };
+  const verb = tokens.shift();
+  const args = [];
+  for (const t of tokens) {
+    const eq = t.indexOf('=');
+    if (eq > 0) args.push({ name: t.slice(0, eq), value: t.slice(eq + 1) });
+    else args.push({ name: '?', value: t });
+  }
+  return { type: 'call', verb, args, out, lineNo };
+}
+
+// ---------------- rendering ----------------
+function renderCall(n) {
+  const cat = CAT[n.verb] || 'ctrl';
+  const args = n.args.map(a =>
+    `<span class="arg"><b>${esc(a.name)}=</b>${esc(a.value)}</span>`).join('');
+  const out = n.out ? `<span class="out">&rarr; ${esc(n.out)}</span>` : '';
+  return `<div><span class="block cat-${cat}" data-line="${n.lineNo}"><span class="verb">${esc(n.verb)}</span>${args}${out}</span></div>`;
+}
+
+function renderControlHead(cat, keyword, label) {
+  const lbl = label ? ` <span class="cond">${label}</span>` : '';
+  return `<span class="block cat-${cat}"><span class="verb">${keyword}</span>${lbl}</span>`;
+}
+
+function build(lines) {
+  // Stack of containers. Root = array of HTML fragments.
+  const root = [];
+  const stack = [{ kids: root, indent: -1, pending: null }];
+
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    const indentMatch = raw.match(/^( *)\S/);
+    if (!indentMatch) continue;
+    const indent = indentMatch[1].length;
+    const node = parseLine(raw, i + 1);
+    if (!node) continue;
+
+    while (stack.length > 1 && stack[stack.length - 1].indent >= indent) stack.pop();
+    const top = stack[stack.length - 1];
+
+    if (node.type === 'error') {
+      top.kids.push(`<div class="error">line ${node.lineNo}: ${esc(node.msg)}</div>`);
+      continue;
+    }
+
+    if (node.type === 'else') {
+      const cont = stack[stack.length - 1];
+      const last = cont.pending;
+      if (last && last.kind === 'if') {
+        const elseKids = [];
+        last.elseRef.kids = elseKids;
+        stack.push({ kids: elseKids, indent, pending: null });
+      } else {
+        top.kids.push(`<div class="error">line ${node.lineNo}: 'else' without matching 'if'</div>`);
+      }
+      continue;
+    }
+
+    if (node.type === 'if' || node.type === 'each' ||
+        node.type === 'repeat' || node.type === 'when') {
+      let head;
+      if (node.type === 'if')     head = renderControlHead('ctrl', 'if',     esc(node.cond));
+      if (node.type === 'each')   head = renderControlHead('data', 'each',   `${esc(node.var)} in ${esc(node.iter)}`);
+      if (node.type === 'repeat') head = renderControlHead('ctrl', 'repeat', esc(node.count));
+      if (node.type === 'when')   head = renderControlHead('when', 'when',   esc(node.event));
+
+      const kids = [];
+      const elseRef = { kids: null };
+      const ph = { kind: node.type, kids, head, elseRef };
+      top.kids.push(ph);
+      top.pending = ph;
+      stack.push({ kids, indent, pending: null });
+      continue;
+    }
+
+    // call
+    top.kids.push(renderCall(node));
+    top.pending = null;
+  }
+
+  return renderKids(root);
+}
+
+function renderKids(kids) {
+  let html = '';
+  for (const k of kids) {
+    if (typeof k === 'string') { html += k; continue; }
+    const cls = 'cblock kind-' + (k.kind === 'when' ? 'when' : k.kind);
+    const hatCls = k.kind === 'when' ? ' hat' : '';
+    let inner = `<div class="${cls}${hatCls}">`;
+    inner += `<div class="cblock-head">${k.head}</div>`;
+    inner += `<div class="cblock-body">${renderKids(k.kids)}</div>`;
+    if (k.elseRef.kids) {
+      inner += `<div class="cblock-else">${renderControlHead('ctrl', 'else', '')}</div>`;
+      inner += `<div class="cblock-body">${renderKids(k.elseRef.kids)}</div>`;
+    }
+    inner += `</div>`;
+    html += inner;
+  }
+  return html;
+}
+
+// ---------------- compile pane ----------------
+const compiledWrap = document.getElementById('compiled-wrap');
+let currentLang = 'python';
+let compileTimer = null;
+let serverAvailable = null; // null = unknown, true/false once known
+
+async function probeServer() {
+  try {
+    const r = await fetch('/api/health', { method: 'GET' });
+    serverAvailable = r.ok;
+  } catch (_) {
+    serverAvailable = false;
+  }
+}
+
+function showHint() {
+  compiledWrap.innerHTML =
+    `<div class="hint">No backend detected. To enable live compilation, run:` +
+    `\n\n    python -m flow serve\n\nand open <code>http://127.0.0.1:8765</code>.</div>`;
+}
+
+async function recompile() {
+  if (serverAvailable === false) { showHint(); return; }
+  try {
+    const r = await fetch('/api/compile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: srcEl.value, lang: currentLang }),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      const pre = document.createElement('pre');
+      pre.textContent = data.output;
+      compiledWrap.replaceChildren(pre);
+    } else {
+      const div = document.createElement('div');
+      div.className = 'error';
+      div.textContent = data.error || 'unknown error';
+      compiledWrap.replaceChildren(div);
+    }
+  } catch (_) {
+    serverAvailable = false;
+    showHint();
+  }
+}
+
+function scheduleCompile() {
+  clearTimeout(compileTimer);
+  compileTimer = setTimeout(recompile, 250);
+}
+
+document.querySelectorAll('.tab').forEach(t => {
+  t.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    currentLang = t.dataset.lang;
+    recompile();
+  });
+});
+
+// ---------------- palette ----------------
+const paletteEl = document.getElementById('palette');
+
+const CATEGORY_ORDER = ['io', 'data', 'math', 'text', 'time', 'net', 'ai'];
+
+async function loadPalette() {
+  if (!serverAvailable) return;
+  try {
+    const r = await fetch('/api/verbs');
+    const data = await r.json();
+    window.VERB_INFO = {};
+    for (const v of data.verbs) window.VERB_INFO[v.name] = v;
+    renderPalette(data.verbs);
+  } catch (_) {}
+}
+
+function renderPalette(verbs) {
+  const byCat = {};
+  for (const v of verbs) (byCat[v.category] = byCat[v.category] || []).push(v);
+  let html = '';
+  for (const cat of CATEGORY_ORDER) {
+    const list = byCat[cat];
+    if (!list) continue;
+    html += `<div class="cat-group">`;
+    html += `<div class="cat-label">${esc(cat)}</div>`;
+    for (const v of list) {
+      const argList = Object.keys(v.args || {}).map(a => `${a}=<${a}>`).join(' ');
+      const tail = v.returns ? ' -> name' : '';
+      const line = `${v.name}${argList ? ' ' + argList : ''}${tail}`;
+      html += `<div class="chip cat-${v.category}" data-line="${esc(line)}" title="${esc(v.summary)}">`;
+      html += `<span class="verb-name">${esc(v.name)}</span>`;
+      if (argList) html += ` <span style="opacity:.75;font-size:10px">${esc(argList)}</span>`;
+      html += `</div>`;
+    }
+    html += `</div>`;
+  }
+  paletteEl.innerHTML = html;
+  paletteEl.querySelectorAll('.chip').forEach(chip => {
+    chip.addEventListener('click', () => insertAtCursor(chip.dataset.line));
+  });
+}
+
+function insertAtCursor(text) {
+  const el = srcEl;
+  const start = el.selectionStart;
+  const end = el.selectionEnd;
+  const before = el.value.slice(0, start);
+  const after = el.value.slice(end);
+  // Determine current line's indent
+  const prevNewline = before.lastIndexOf('\n');
+  const currentLine = before.slice(prevNewline + 1);
+  const indentMatch = currentLine.match(/^( *)/);
+  const indent = indentMatch ? indentMatch[1] : '';
+  // If we're mid-line, drop to new line first
+  const needsNewline = before.length > 0 && !before.endsWith('\n') && currentLine.trim().length > 0;
+  const insertion = (needsNewline ? '\n' + indent : '') + text + '\n' + indent;
+  el.value = before + insertion + after;
+  el.selectionStart = el.selectionEnd = (before + insertion).length;
+  el.focus();
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+// ---------------- examples + save/load ----------------
+async function loadExamples() {
+  if (!serverAvailable) return;
+  try {
+    const r = await fetch('/api/examples');
+    const data = await r.json();
+    const sel = document.getElementById('examples-select');
+    for (const ex of data.examples) {
+      const opt = document.createElement('option');
+      opt.value = ex.name;
+      opt.textContent = ex.summary ? `${ex.name} — ${ex.summary}` : ex.name;
+      sel.appendChild(opt);
+    }
+  } catch (_) {}
+}
+
+async function loadExample(name) {
+  if (!name) return;
+  try {
+    const r = await fetch('/api/example?name=' + encodeURIComponent(name));
+    if (!r.ok) return;
+    const text = await r.text();
+    srcEl.value = text;
+    refresh();
+    scheduleCompile();
+  } catch (_) {}
+}
+
+function downloadCurrent() {
+  const blob = new Blob([srcEl.value], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'untitled.flow';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function handleUpload(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    srcEl.value = String(reader.result || '');
+    refresh();
+    scheduleCompile();
+  };
+  reader.readAsText(file);
+}
+
+// ---------------- block-edit modal ----------------
+const modalRoot = document.getElementById('modal-root');
+
+function openBlockEditor(lineNo) {
+  if (!serverAvailable) {
+    alert('Block editing needs the server. Run: python -m flow serve');
+    return;
+  }
+  const lines = srcEl.value.split('\n');
+  const line = lines[lineNo - 1] || '';
+  const node = parseLine(line, lineNo);
+  if (!node || node.type !== 'call') return;
+
+  const verbInfo = (window.VERB_INFO || {})[node.verb] || { args: {}, returns: false };
+  const declaredArgs = Object.keys(verbInfo.args || {});
+  // Use declared arg order; include any user-supplied args we don't know about at the end.
+  const knownNames = new Set(declaredArgs);
+  const extras = node.args.map(a => a.name).filter(n => !knownNames.has(n));
+  const argNames = declaredArgs.concat(extras);
+  const argValues = {};
+  for (const a of node.args) argValues[a.name] = a.value;
+
+  let body = `<h4>Edit: <span style="color:#2563eb">${esc(node.verb)}</span></h4>`;
+  body += `<p class="hint-line">Hint: prefix with <code>$</code> for a variable reference (e.g. <code>$rows</code>). Otherwise input is a string.</p>`;
+  for (const name of argNames) {
+    const val = argValues[name] != null ? argValues[name] : '';
+    body += `<div class="field">`;
+    body += `<label>${esc(name)}</label>`;
+    body += `<input data-arg="${esc(name)}" value="${esc(stripQuotes(val))}"/>`;
+    body += `</div>`;
+  }
+  if (verbInfo.returns) {
+    body += `<div class="field">`;
+    body += `<label>-&gt; name</label>`;
+    body += `<input id="modal-out" value="${esc(node.out || '')}"/>`;
+    body += `</div>`;
+  }
+  body += `<div class="buttons">`;
+  body += `<button class="secondary" id="modal-cancel">Cancel</button>`;
+  body += `<button class="primary"   id="modal-save">Save</button>`;
+  body += `</div>`;
+
+  modalRoot.innerHTML = `<div class="modal-overlay"><div class="modal">${body}</div></div>`;
+  modalRoot.classList.remove('hidden');
+
+  modalRoot.querySelector('#modal-cancel').onclick = closeModal;
+  modalRoot.querySelector('.modal-overlay').onclick = (e) => {
+    if (e.target.classList.contains('modal-overlay')) closeModal();
+  };
+  modalRoot.querySelector('#modal-save').onclick = () => commitEdit(lineNo, verbInfo);
+}
+
+function stripQuotes(v) {
+  if (v == null) return '';
+  v = String(v);
+  if (v.length >= 2 && v[0] === '"' && v[v.length-1] === '"') {
+    try { return JSON.parse(v); } catch { return v; }
+  }
+  return v;
+}
+
+function closeModal() {
+  modalRoot.classList.add('hidden');
+  modalRoot.innerHTML = '';
+}
+
+async function commitEdit(lineNo, verbInfo) {
+  const args = {};
+  modalRoot.querySelectorAll('input[data-arg]').forEach(inp => {
+    const name = inp.dataset.arg;
+    const raw = inp.value.trim();
+    if (raw === '') return; // skip empty
+    // Coerce: $name → variable (string starting with $),
+    //         number → number, true/false → bool, otherwise → string.
+    let v;
+    if (raw.startsWith('$')) v = raw;                                  // server treats as Name
+    else if (/^-?\d+(?:\.\d+)?$/.test(raw)) v = parseFloat(raw);
+    else if (raw === 'true') v = true;
+    else if (raw === 'false') v = false;
+    else v = raw;
+    args[name] = v;
+  });
+  const outEl2 = modalRoot.querySelector('#modal-out');
+  const out = outEl2 ? outEl2.value.trim() : null;
+
+  try {
+    const r = await fetch('/api/edit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: srcEl.value, edits: [{ line: lineNo, args, out }] }),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      srcEl.value = data.source;
+      closeModal();
+      refresh();
+      scheduleCompile();
+    } else {
+      alert('Edit failed: ' + data.error);
+    }
+  } catch (e) {
+    alert('Edit failed: ' + e.message);
+  }
+}
+
+// ---------------- wiring ----------------
+const srcEl = document.getElementById('src');
+const outEl = document.getElementById('out');
+
+function refresh() {
+  const lines = srcEl.value.split('\n');
+  outEl.innerHTML = build(lines);
+  // Wire up block click → editor
+  outEl.querySelectorAll('.block[data-line]').forEach(b => {
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const ln = parseInt(b.dataset.line, 10);
+      if (ln) openBlockEditor(ln);
+    });
+  });
+}
+
+srcEl.addEventListener('input', () => { refresh(); scheduleCompile(); });
+
+// Sample on first load
+srcEl.value = `# Workflow: fetch users, keep adults, summarize, save report
+
+when start
+  http_get url=https://api.example.com/users -> users
+  filter from=users where="x['age'] >= 18" -> adults
+  count of=adults -> n
+
+  if n > 0
+    summarize input=adults -> summary
+    write file=report.txt text=summary
+    print value="report saved"
+  else
+    print value="no adults found"
+
+  each user in adults
+    format template="hi {name}, age {age}" data=user -> msg
+    print value=msg
+`;
+refresh();
+probeServer().then(() => {
+  if (serverAvailable) { recompile(); loadPalette(); loadExamples(); }
+  else { showHint(); paletteEl.innerHTML = '<div style="font-size:11px;color:#94a3b8;padding:8px;">Palette unavailable<br>(needs <code>flow serve</code>)</div>'; }
+});
+
+// Examples dropdown + upload/download wiring
+document.getElementById('examples-select').addEventListener('change', (e) => {
+  loadExample(e.target.value);
+  e.target.value = ''; // reset so re-selecting same value works
+});
+document.getElementById('btn-download').addEventListener('click', downloadCurrent);
+document.getElementById('btn-upload').addEventListener('click', () => {
+  document.getElementById('upload-input').click();
+});
+document.getElementById('upload-input').addEventListener('change', (e) => {
+  const f = e.target.files && e.target.files[0];
+  if (f) handleUpload(f);
+  e.target.value = '';
+});
+</script>
+</body>
+</html>

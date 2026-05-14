@@ -1,0 +1,446 @@
+"""
+Flow compiler — AST → target language source.
+
+Currently supports: python, js.
+
+Compilation strategy:
+  1. Validate verbs against registry.
+  2. Track variable scope (which `-> name` bindings are live).
+  3. Render Value nodes into target-language expressions
+     (using scope to distinguish variable refs from string-literal barewords).
+  4. Apply each verb's template, substituting rendered args.
+  5. Emit control flow (if/each/repeat/when) natively per target.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from typing import List, Set
+
+from .parser import (
+    Program, Call, IfStmt, EachStmt, RepeatStmt, WhenStmt,
+    StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, Arg,
+    ListLit, DictLit,
+)
+
+_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+from .verbs import VERBS, VerbSpec
+
+
+class CompileError(Exception):
+    def __init__(self, msg: str, line: int = 0):
+        self.msg = msg
+        self.line = line
+        loc = f"line {line}: " if line else ""
+        super().__init__(f"{loc}{msg}")
+
+
+SUPPORTED_LANGS = ("python", "js", "go", "rust", "bash")
+
+
+# ============================================================
+# Entry point
+# ============================================================
+
+
+def compile_to(program: Program, lang: str) -> str:
+    if lang not in SUPPORTED_LANGS:
+        raise CompileError(f"unsupported target language: {lang!r} "
+                           f"(supported: {', '.join(SUPPORTED_LANGS)})")
+    c = _Compiler(lang)
+    c.emit_program(program)
+    return c.source()
+
+
+# ============================================================
+# Compiler
+# ============================================================
+
+
+class _Compiler:
+    def __init__(self, lang: str):
+        self.lang = lang
+        self.lines: List[str] = []
+        self.scope: Set[str] = set()
+        self.indent = 0
+        if lang == "python":
+            self.indent_str = "    "
+        elif lang == "bash":
+            self.indent_str = "  "
+        else:  # js, go, rust
+            self.indent_str = "  "
+
+    def source(self) -> str:
+        return "\n".join(self.lines) + ("\n" if self.lines else "")
+
+    # ---------- writers ----------
+
+    def _emit(self, line: str) -> None:
+        self.lines.append(self.indent_str * self.indent + line)
+
+    def _block_open(self) -> None:
+        self.indent += 1
+
+    def _block_close(self, py_pass_if_empty: bool = True) -> None:
+        # If we just opened a Python block and emitted nothing, drop a 'pass'.
+        if self.lang == "python" and py_pass_if_empty:
+            i_prefix = self.indent_str * self.indent
+            if not self.lines or not self.lines[-1].startswith(i_prefix):
+                self._emit("pass")
+        self.indent -= 1
+        if self.lang in ("js", "go", "rust"):
+            self._emit("}")
+        # Bash block-close handled in emit_if / emit_each / emit_repeat directly.
+
+    # ---------- program ----------
+
+    def emit_program(self, program: Program) -> None:
+        for stmt in program.body:
+            self.emit_stmt(stmt)
+
+    # ---------- statements ----------
+
+    def emit_stmt(self, stmt) -> None:
+        if isinstance(stmt, Call):
+            self.emit_call(stmt)
+        elif isinstance(stmt, IfStmt):
+            self.emit_if(stmt)
+        elif isinstance(stmt, EachStmt):
+            self.emit_each(stmt)
+        elif isinstance(stmt, RepeatStmt):
+            self.emit_repeat(stmt)
+        elif isinstance(stmt, WhenStmt):
+            self.emit_when(stmt)
+        else:
+            raise CompileError(f"unknown statement type: {type(stmt).__name__}")
+
+    def emit_call(self, call: Call) -> None:
+        spec = VERBS.get(call.verb)
+        if spec is None:
+            raise CompileError(f"unknown verb {call.verb!r} (not in registry)", call.line)
+
+        # Validate args
+        for a in call.args:
+            if a.name not in spec.args:
+                allowed = ", ".join(sorted(spec.args.keys())) or "(none)"
+                raise CompileError(
+                    f"verb {call.verb!r} doesn't accept arg {a.name!r}. Allowed: {allowed}",
+                    call.line,
+                )
+
+        if call.out and not spec.returns:
+            raise CompileError(
+                f"verb {call.verb!r} does not return a value but '-> {call.out}' was given",
+                call.line,
+            )
+
+        template = spec.templates.get(self.lang)
+        if template is None:
+            raise CompileError(
+                f"verb {call.verb!r} has no template for {self.lang!r}",
+                call.line,
+            )
+
+        # Render args to target-language expressions.
+        # If an arg is listed in raw_args and its value is a StringLit, embed raw.
+        ctx: dict = {}
+        for name, arg in _pairs_by_name(call.args):
+            if name in spec.raw_args and isinstance(arg.value, StringLit):
+                ctx[name] = arg.value.value
+            else:
+                ctx[name] = self._render_value(arg.value)
+        # Fill missing args (declared but not provided) with safe defaults
+        for arg_name in spec.args:
+            if arg_name not in ctx:
+                ctx[arg_name] = "None" if self.lang == "python" else "null"
+        ctx["out"] = call.out or "_"
+
+        try:
+            rendered = template.format(**ctx)
+        except KeyError as e:
+            raise CompileError(
+                f"template for {call.verb!r} references missing arg {e}",
+                call.line,
+            )
+
+        self._emit(rendered)
+
+        if call.out:
+            self.scope.add(call.out)
+
+    def emit_if(self, stmt: IfStmt) -> None:
+        cond_src = self._render_value(stmt.cond)
+        if self.lang == "python":
+            self._emit(f"if {cond_src}:")
+            self._block_open()
+            for s in stmt.then:
+                self.emit_stmt(s)
+            self._block_close()
+            if stmt.else_:
+                self._emit("else:")
+                self._block_open()
+                for s in stmt.else_:
+                    self.emit_stmt(s)
+                self._block_close()
+            return
+        if self.lang == "bash":
+            self._emit(f"if (( {cond_src} )); then")
+            self._block_open()
+            for s in stmt.then:
+                self.emit_stmt(s)
+            self.indent -= 1
+            if stmt.else_:
+                self._emit("else")
+                self._block_open()
+                for s in stmt.else_:
+                    self.emit_stmt(s)
+                self.indent -= 1
+            self._emit("fi")
+            return
+        # js, go, rust — use idiomatic `} else {`
+        open_line = (f"if {cond_src} {{" if self.lang in ("go", "rust")
+                     else f"if ({cond_src}) {{")
+        self._emit(open_line)
+        self._block_open()
+        for s in stmt.then:
+            self.emit_stmt(s)
+        self.indent -= 1
+        if stmt.else_:
+            self._emit("} else {")
+            self._block_open()
+            for s in stmt.else_:
+                self.emit_stmt(s)
+            self._block_close()
+        else:
+            self._emit("}")
+
+    def emit_each(self, stmt: EachStmt) -> None:
+        iter_src = self._render_value(stmt.iterable)
+        if self.lang == "python":
+            self._emit(f"for {stmt.var} in {iter_src}:")
+        elif self.lang == "js":
+            self._emit(f"for (const {stmt.var} of {iter_src}) {{")
+        elif self.lang == "go":
+            self._emit(f"for _, {stmt.var} := range {iter_src} {{")
+        elif self.lang == "rust":
+            self._emit(f"for {stmt.var} in {iter_src} {{")
+        elif self.lang == "bash":
+            self._emit(f"for {stmt.var} in \"${{{iter_src}[@]}}\"; do")
+        previously_in_scope = stmt.var in self.scope
+        self.scope.add(stmt.var)
+        self._block_open()
+        for s in stmt.body:
+            self.emit_stmt(s)
+        if not previously_in_scope:
+            self.scope.discard(stmt.var)
+        if self.lang == "bash":
+            self.indent -= 1
+            self._emit("done")
+        else:
+            self._block_close()
+
+    def emit_repeat(self, stmt: RepeatStmt) -> None:
+        count_src = self._render_value(stmt.count)
+        if self.lang == "python":
+            self._emit(f"for _ in range(int({count_src})):")
+        elif self.lang == "js":
+            self._emit(f"for (let _i = 0; _i < ({count_src}); _i++) {{")
+        elif self.lang == "go":
+            self._emit(f"for _i := 0; _i < {count_src}; _i++ {{")
+        elif self.lang == "rust":
+            self._emit(f"for _i in 0..({count_src}) {{")
+        elif self.lang == "bash":
+            self._emit(f"for _i in $(seq 1 {count_src}); do")
+        self._block_open()
+        for s in stmt.body:
+            self.emit_stmt(s)
+        if self.lang == "bash":
+            self.indent -= 1
+            self._emit("done")
+        else:
+            self._block_close()
+
+    def emit_when(self, stmt: WhenStmt) -> None:
+        # MVP: only `when start` is meaningful — treat as program entry.
+        if stmt.event == "start":
+            if self.lang == "python":
+                self._emit("def main():")
+                self._block_open()
+                for s in stmt.body:
+                    self.emit_stmt(s)
+                self._block_close()
+                self._emit('if __name__ == "__main__":')
+                self._block_open()
+                self._emit("main()")
+                self._block_close(py_pass_if_empty=False)
+            elif self.lang == "js":
+                self._emit("async function main() {")
+                self._block_open()
+                for s in stmt.body:
+                    self.emit_stmt(s)
+                self._block_close()
+                self._emit("main();")
+            elif self.lang == "go":
+                self._emit("func main() {")
+                self._block_open()
+                for s in stmt.body:
+                    self.emit_stmt(s)
+                self._block_close()
+            elif self.lang == "rust":
+                self._emit("fn main() {")
+                self._block_open()
+                for s in stmt.body:
+                    self.emit_stmt(s)
+                self._block_close()
+            elif self.lang == "bash":
+                self._emit("main() {")
+                self._block_open()
+                for s in stmt.body:
+                    self.emit_stmt(s)
+                self.indent -= 1
+                self._emit("}")
+                self._emit("main")
+            return
+        # Other events: emit a comment shell so a host can register.
+        comment = "# " if self.lang in ("python", "bash") else "// "
+        args = " ".join(self._render_value(a) for a in stmt.args)
+        self._emit(f"{comment}event handler: when {stmt.event} {args}")
+        if self.lang == "python":
+            self._emit(f"def on_{stmt.event}():")
+            self._block_open()
+            for s in stmt.body:
+                self.emit_stmt(s)
+            self._block_close()
+        elif self.lang == "js":
+            self._emit(f"async function on_{stmt.event}() {{")
+            self._block_open()
+            for s in stmt.body:
+                self.emit_stmt(s)
+            self._block_close()
+        elif self.lang in ("go", "rust"):
+            kw = "func" if self.lang == "go" else "fn"
+            self._emit(f"{kw} on_{stmt.event}() {{")
+            self._block_open()
+            for s in stmt.body:
+                self.emit_stmt(s)
+            self._block_close()
+        elif self.lang == "bash":
+            self._emit(f"on_{stmt.event}() {{")
+            self._block_open()
+            for s in stmt.body:
+                self.emit_stmt(s)
+            self.indent -= 1
+            self._emit("}")
+
+    # ---------- values ----------
+
+    def _render_value(self, v) -> str:
+        if isinstance(v, StringLit):
+            return self._str_literal(v.value)
+        if isinstance(v, NumberLit):
+            return str(int(v.value)) if v.value.is_integer() else str(v.value)
+        if isinstance(v, BoolLit):
+            if self.lang == "python":
+                return "True" if v.value else "False"
+            if self.lang == "bash":
+                return "1" if v.value else "0"
+            return "true" if v.value else "false"
+        if isinstance(v, ListLit):
+            if self.lang == "bash":
+                # Space-separated array literal
+                bparts = " ".join(self._render_value(x) for x in v.items)
+                return f"({bparts})"
+            parts = ", ".join(self._render_value(x) for x in v.items)
+            if self.lang == "go":   return f"[]any{{{parts}}}"
+            if self.lang == "rust": return f"vec![{parts}]"
+            return f"[{parts}]"
+        if isinstance(v, DictLit):
+            if self.lang in ("go",):
+                # map[string]any{"k": v, ...}
+                parts = ", ".join(
+                    f"{self._str_literal(k)}: {self._render_value(val)}"
+                    for k, val in v.entries
+                )
+                return f"map[string]any{{{parts}}}"
+            if self.lang in ("rust", "bash"):
+                raise CompileError(f"dict literals are not supported in {self.lang}")
+            if self.lang == "python":
+                parts = ", ".join(f"{self._str_literal(k)}: {self._render_value(val)}" for k, val in v.entries)
+            else:  # js
+                parts = ", ".join(
+                    f"{k if _IDENT_RE.match(k) else self._str_literal(k)}: {self._render_value(val)}"
+                    for k, val in v.entries
+                )
+            return "{" + parts + "}"
+        if isinstance(v, Name):
+            return self._render_name(v)
+        if isinstance(v, FuncCall):
+            return self._render_funccall(v)
+        if isinstance(v, BinOp):
+            l = self._render_value(v.left)
+            r = self._render_value(v.right)
+            op = v.op
+            if op == "and":
+                op = "and" if self.lang == "python" else "&&"
+            elif op == "or":
+                op = "or"  if self.lang == "python" else "||"
+            return f"({l} {op} {r})"
+        raise CompileError(f"cannot render value of type {type(v).__name__}")
+
+    def _render_name(self, n: Name) -> str:
+        """
+        A Name like ['rows'] or ['row', 'name'] or ['data', 'csv'].
+
+        Rule:
+          - If parts[0] is in scope → variable reference, dots = member access.
+          - Otherwise → treat the whole thing as a string literal.
+        """
+        first = n.parts[0]
+        if first in self.scope:
+            if self.lang == "bash":
+                # Bash: $var, member access not supported — render as $var only.
+                return f"${first}"
+            if self.lang == "go":
+                # Go has no dict bracket access for `any`; emit a type-asserted
+                # path that is best-effort. Pure variable refs work fine.
+                if len(n.parts) == 1:
+                    return first
+                inner = first + "".join(f".(map[string]any)[{self._str_literal(p)}]" for p in n.parts[1:])
+                return inner
+            if self.lang == "rust":
+                # Rust: same caveat — member access on opaque values is non-trivial.
+                if len(n.parts) == 1:
+                    return first
+                return first + "".join(f'[{self._str_literal(p)}]' for p in n.parts[1:])
+            # python, js
+            if len(n.parts) == 1:
+                return first
+            return first + "".join(f"[{self._str_literal(p)}]" for p in n.parts[1:])
+        # Not in scope — treat as string literal.
+        return self._str_literal(".".join(n.parts))
+
+    def _render_funccall(self, f: FuncCall) -> str:
+        # Inline builtins; otherwise treat as host function (user-provided).
+        BUILTINS = {
+            "count": {"python": "len", "js": "(_x => _x.length)", "go": "len",     "rust": "<no-op>",   "bash": ""},
+            "len":   {"python": "len", "js": "(_x => _x.length)", "go": "len",     "rust": "<no-op>",   "bash": ""},
+            "min":   {"python": "min", "js": "Math.min",          "go": "<no-op>", "rust": "<no-op>",   "bash": ""},
+            "max":   {"python": "max", "js": "Math.max",          "go": "<no-op>", "rust": "<no-op>",   "bash": ""},
+            "abs":   {"python": "abs", "js": "Math.abs",          "go": "math.Abs", "rust": "<no-op>",  "bash": ""},
+            "str":   {"python": "str", "js": "String",            "go": "fmt.Sprintf", "rust": "format!", "bash": ""},
+            "int":   {"python": "int", "js": "parseInt",          "go": "int",     "rust": "i64::from", "bash": ""},
+            "float": {"python": "float","js": "parseFloat",       "go": "float64", "rust": "f64::from", "bash": ""},
+        }
+        args = ", ".join(self._render_value(a) for a in f.args)
+        if f.name in BUILTINS and BUILTINS[f.name].get(self.lang, "<no-op>") != "<no-op>":
+            return f"{BUILTINS[f.name][self.lang]}({args})"
+        return f"{f.name}({args})"
+
+    def _str_literal(self, s: str) -> str:
+        return json.dumps(s, ensure_ascii=False)
+
+
+def _pairs_by_name(args: List[Arg]):
+    for a in args:
+        yield a.name, a
