@@ -19,7 +19,7 @@ from typing import List
 from .parser import (
     Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhenStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, Arg,
-    ListLit, DictLit,
+    ListLit, DictLit, Ternary,
 )
 
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -134,4 +134,6 @@ def _fmt_value(v) -> str:
             key_repr = k if _IDENT_RE.match(k) else json.dumps(k, ensure_ascii=False)
             parts.append(f"{key_repr}: {_fmt_value(val)}")
         return "{" + ", ".join(parts) + "}"
+    if isinstance(v, Ternary):
+        return f"({_fmt_value(v.cond)} ? {_fmt_value(v.then)} : {_fmt_value(v.else_)})"
     raise ValueError(f"unknown value type: {type(v).__name__}")

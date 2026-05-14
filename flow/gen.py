@@ -131,13 +131,20 @@ def generate(
     cfg: Optional[LLMConfig] = None,
     retries: int = 3,
     verbose: bool = False,
+    polish: bool = True,
 ) -> str:
-    """Generate Flow code from a natural-language request, with self-correction."""
+    """Generate Flow code from a natural-language request, with self-correction.
+
+    When `polish` is True (default), after the LLM produces valid code we run
+    `flow lint` and, if there are suggestions, ask the LLM once to rewrite in
+    the shorter form. We keep the polished version only if it ALSO validates.
+    """
     cfg = cfg or LLMConfig()
     messages = _build_messages(request)
 
     last_error = None
     last_code = ""
+    code = None
     for attempt in range(1, retries + 2):
         if verbose:
             print(f"--- attempt {attempt} ---", file=sys.stderr)
@@ -151,13 +158,16 @@ def generate(
         try:
             ast = parse(code)
             compile_to(ast, "python")   # checks verb/arg validity too
-            return code
+            break  # accepted — proceed to polish
         except (ParseError, CompileError) as e:
             last_error = str(e)
             if verbose:
                 print(f"error: {last_error}", file=sys.stderr)
             if attempt > retries:
-                break
+                raise LLMError(
+                    f"failed after {retries} retries.\nLast error: {last_error}\n"
+                    f"Last code:\n{last_code}"
+                )
             # Feed the error back so the model can fix it.
             messages.append({"role": "assistant", "content": code})
             messages.append({
@@ -168,11 +178,45 @@ def generate(
                     f"Output Flow source only, no fences, no commentary."
                 ),
             })
+            code = None
 
-    raise LLMError(
-        f"failed after {retries} retries.\nLast error: {last_error}\n"
-        f"Last code:\n{last_code}"
+    assert code is not None  # we broke out of the loop above
+    if not polish:
+        return code
+
+    # Polish pass: lint-driven rewrite, kept only if it still validates.
+    try:
+        from .lint import lint_source
+    except Exception:
+        return code
+    warnings = lint_source(code)
+    if not warnings:
+        return code
+
+    if verbose:
+        print(f"--- polish pass: {len(warnings)} suggestions ---", file=sys.stderr)
+    suggestion_block = "\n".join(
+        f"  line {w.line}: replace `{w.message}` → `{w.suggestion}`"
+        for w in warnings
     )
+    messages.append({"role": "assistant", "content": code})
+    messages.append({
+        "role": "user",
+        "content": (
+            "The code is valid but verbose. Apply these shorter forms:\n"
+            f"{suggestion_block}\n\n"
+            "Return the rewritten Flow program. Output Flow source only."
+        ),
+    })
+    try:
+        reply2 = _chat(messages, cfg)
+        polished = _extract_code(reply2)
+        ast2 = parse(polished)
+        compile_to(ast2, "python")
+        return polished
+    except (ParseError, CompileError, LLMError):
+        # Polish failed — return the validated-but-verbose version.
+        return code
 
 
 # ---------- CLI integration ----------
@@ -191,7 +235,12 @@ def cli_main(args) -> None:
         key=os.environ.get("FLOW_LLM_KEY", ""),
     )
     try:
-        code = generate(request, cfg=cfg, retries=args.retries, verbose=args.verbose)
+        code = generate(
+            request, cfg=cfg,
+            retries=args.retries,
+            verbose=args.verbose,
+            polish=not getattr(args, "no_lint", False),
+        )
     except LLMError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(2)

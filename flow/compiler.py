@@ -21,7 +21,7 @@ from typing import List, Set
 from .parser import (
     Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhenStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, Arg,
-    ListLit, DictLit,
+    ListLit, DictLit, Ternary,
 )
 
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -441,6 +441,21 @@ class _Compiler:
             elif op == "or":
                 op = "or"  if self.lang == "python" else "||"
             return f"({l} {op} {r})"
+        if isinstance(v, Ternary):
+            cond = self._render_value(v.cond)
+            then = self._render_value(v.then)
+            else_ = self._render_value(v.else_)
+            if self.lang == "python":
+                return f"({then} if {cond} else {else_})"
+            if self.lang in ("js", "rust"):
+                return f"({cond} ? {then} : {else_})"
+            if self.lang == "go":
+                # Go has no ternary — emit an IIFE.
+                return f"func() any {{ if {cond} {{ return {then} }}; return {else_} }}()"
+            if self.lang == "bash":
+                # Bash: `[[ cond ]] && echo a || echo b` in a subshell.
+                return f"$(if (( {cond} )); then echo {then}; else echo {else_}; fi)"
+            raise CompileError(f"ternary not supported for lang {self.lang!r}")
         raise CompileError(f"cannot render value of type {type(v).__name__}")
 
     def _render_name(self, n: Name) -> str:

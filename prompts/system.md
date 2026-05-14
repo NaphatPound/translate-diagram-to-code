@@ -53,6 +53,10 @@ follow these rules exactly. The parser is strict; deviations will fail.
         p (print)  r (read)   w (write)  f (filter)  m (map)
         c (count)  u (upper)  l (lower)  s (sort)    t (trim)
     Example: `r "a.csv" | f where="x.age>18" | p` ≡ the longhand equivalent.
+15. **Ternary expression** `cond ? then : else` for inline conditionals:
+        msg = x > 0 ? "big" : "small"     # one line instead of 4
+        print (x > 0 ? "yes" : "no")
+    Use parens if the ternary is inside a function call's arg value.
 
 ## Verb categories (you may only use these verbs)
 

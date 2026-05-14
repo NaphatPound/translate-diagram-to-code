@@ -90,6 +90,11 @@ def cmd_bench(args):
     cli_main(args)
 
 
+def cmd_lint(args):
+    from .lint import cli_main
+    cli_main(args)
+
+
 def cmd_render(args):
     """Emit a standalone HTML file that renders this program's blocks.
 
@@ -158,6 +163,8 @@ def main():
     pg.add_argument("--model", help="model name (default: env FLOW_LLM_MODEL or llama3.2)")
     pg.add_argument("--retries", type=int, default=3, help="self-correction retries on parse/compile error")
     pg.add_argument("--verbose", action="store_true", help="show each attempt to stderr")
+    pg.add_argument("--no-lint", action="store_true",
+                    help="skip the lint-driven polish pass after success")
     pg.set_defaults(func=cmd_gen)
 
     pv = sub.add_parser("review", help="compile + run + ask a big LLM to judge correctness")
@@ -172,6 +179,11 @@ def main():
     pb.add_argument("--endpoint", help="OpenAI-compatible endpoint (default: env or http://localhost:11434/v1)")
     pb.add_argument("--model",    help="model name (default: env or llama3.2)")
     pb.set_defaults(func=cmd_bench)
+
+    pl = sub.add_parser("lint", help="report verbose Flow patterns with shorter equivalents")
+    pl.add_argument("file")
+    pl.add_argument("--fail", action="store_true", help="exit 1 if any warnings")
+    pl.set_defaults(func=cmd_lint)
 
     args = p.parse_args()
     args.func(args)

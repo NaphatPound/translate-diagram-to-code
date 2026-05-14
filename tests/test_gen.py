@@ -27,7 +27,7 @@ class TestLoop(unittest.TestCase):
     @patch("flow.gen._chat")
     def test_first_attempt_succeeds(self, mock_chat):
         mock_chat.return_value = 'print value="hi"'
-        out = generate("say hi", retries=1)
+        out = generate("say hi", retries=1, polish=False)
         self.assertIn("print", out)
         self.assertEqual(mock_chat.call_count, 1)
 
@@ -38,7 +38,7 @@ class TestLoop(unittest.TestCase):
             "if x = 1\n  print value=hi",   # uses '=' instead of '=='
             'if x == 1\n  print value="hi"',
         ]
-        out = generate("if x is 1 print hi", retries=2)
+        out = generate("if x is 1 print hi", retries=2, polish=False)
         self.assertIn("print", out)
         self.assertEqual(mock_chat.call_count, 2)
 
@@ -46,7 +46,7 @@ class TestLoop(unittest.TestCase):
     def test_gives_up_after_retries(self, mock_chat):
         mock_chat.return_value = "if x = 1\n  print value=hi"  # always wrong
         with self.assertRaises(LLMError) as ctx:
-            generate("bad", retries=2)
+            generate("bad", retries=2, polish=False)
         self.assertIn("failed after 2 retries", str(ctx.exception))
         # 1 initial attempt + 2 retries = 3 calls
         self.assertEqual(mock_chat.call_count, 3)
@@ -57,8 +57,28 @@ class TestLoop(unittest.TestCase):
             "doesnotexist x=1",
             'print value="ok"',
         ]
-        out = generate("print ok", retries=2)
+        out = generate("print ok", retries=2, polish=False)
         self.assertEqual(out, 'print value="ok"')
+
+    @patch("flow.gen._chat")
+    def test_polish_rewrites_verbose_code(self, mock_chat):
+        # First reply is valid but verbose; polish pass returns a shorter form.
+        mock_chat.side_effect = [
+            'add a=3 b=4 -> s\nprint value=s',
+            's = 3 + 4\nprint s',
+        ]
+        out = generate("3 + 4", retries=1, polish=True)
+        self.assertIn("s = 3 + 4", out)
+        self.assertEqual(mock_chat.call_count, 2)
+
+    @patch("flow.gen._chat")
+    def test_polish_keeps_original_if_rewrite_invalid(self, mock_chat):
+        mock_chat.side_effect = [
+            'add a=3 b=4 -> s\nprint value=s',
+            'this is not valid flow',   # polish reply fails — keep original
+        ]
+        out = generate("3 + 4", retries=1, polish=True)
+        self.assertIn("add a=3", out)
 
 
 if __name__ == "__main__":

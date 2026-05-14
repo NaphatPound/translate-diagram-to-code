@@ -27,7 +27,7 @@ from typing import List, Optional, Union, Tuple, Any
 # AST
 # ============================================================
 
-Value = Union["StringLit", "NumberLit", "BoolLit", "Name", "FuncCall", "BinOp", "ListLit", "DictLit"]
+Value = Union["StringLit", "NumberLit", "BoolLit", "Name", "FuncCall", "BinOp", "ListLit", "DictLit", "Ternary"]
 Stmt = Union["Call", "AssignStmt", "IfStmt", "EachStmt", "RepeatStmt", "WhenStmt"]
 
 
@@ -82,6 +82,14 @@ class ListLit:
 class DictLit:
     entries: List[Tuple[str, Value]]   # (key, value) pairs
     kind: str = "dict"
+
+
+@dataclass
+class Ternary:
+    cond: Value
+    then: Value
+    else_: Value
+    kind: str = "ternary"
 
 
 @dataclass
@@ -189,6 +197,7 @@ TOKEN_SPEC = [
     ("ARROW", r"->"),
     ("CMP", r">=|<=|==|!="),
     ("PIPE", r"\|"),
+    ("QMARK", r"\?"),
     ("OP", r"[=<>+\-*/]"),
     ("NUMBER", r"\d+(?:\.\d+)?"),
     ("LPAREN", r"\("),
@@ -504,6 +513,17 @@ class _Parser:
             return self._parse_list(toks, i, line_no)
         if t.kind == "LBRACE":
             return self._parse_dict(toks, i, line_no)
+        if t.kind == "LPAREN":
+            # Parenthesized expression: full expr (ternary, binary, etc.).
+            i += 1
+            expr, i = self._parse_expr(toks, i, line_no)
+            if i >= len(toks) or toks[i].kind != "RPAREN":
+                raise ParseError(
+                    "expected ')' to close grouped expression",
+                    toks[i].line if i < len(toks) else line_no,
+                    toks[i].col if i < len(toks) else 1,
+                )
+            return expr, i + 1
         if t.kind == "WORD":
             # Could be: ident, ident.ident.ident, ident(args), or filename-like
             # If followed by '(' → FuncCall
@@ -590,7 +610,7 @@ class _Parser:
                              toks[i].line, toks[i].col)
 
     def _parse_expr(self, toks: List[Token], i: int, line_no: int) -> Tuple[Value, int]:
-        """Parse a (possibly binary) expression. Used for 'if' conditions."""
+        """Parse a (possibly binary, possibly ternary) expression."""
         left, i = self._parse_value(toks, i, line_no)
         while i < len(toks) and toks[i].kind in ("CMP", "OP", "KW_AND", "KW_OR"):
             op_tok = toks[i]
@@ -600,6 +620,19 @@ class _Parser:
             i += 1
             right, i = self._parse_value(toks, i, line_no)
             left = BinOp(op, left, right)
+        # Ternary: <expr> ? <then> : <else>
+        if i < len(toks) and toks[i].kind == "QMARK":
+            i += 1
+            then_val, i = self._parse_expr(toks, i, line_no)
+            if i >= len(toks) or toks[i].kind != "COLON":
+                raise ParseError(
+                    "ternary '?' must be followed by '... : ...'",
+                    toks[i].line if i < len(toks) else line_no,
+                    toks[i].col if i < len(toks) else 1,
+                )
+            i += 1
+            else_val, i = self._parse_expr(toks, i, line_no)
+            left = Ternary(cond=left, then=then_val, else_=else_val)
         return left, i
 
     # ---------- control blocks ----------
