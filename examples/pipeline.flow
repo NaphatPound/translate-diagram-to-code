@@ -1,0 +1,3 @@
+# Compact pipeline form: read → upper → write. No intermediate names needed.
+read "examples/words.txt" | upper | write file="/tmp/words_upper.txt"
+print "done"

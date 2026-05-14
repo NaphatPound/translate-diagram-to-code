@@ -148,6 +148,43 @@ each item in top
 
 ---
 
+### Example 10 — Compact form (pipe + positional primary)
+
+USER:
+read input.txt, uppercase, save to output.txt
+
+ASSISTANT (compact — preferred for linear pipelines):
+```
+read "input.txt" | upper | write file="output.txt"
+```
+
+ASSISTANT (equivalent longhand):
+```
+read file="input.txt" -> text
+upper text=text -> big
+write file="output.txt" text=big
+```
+
+The compact form uses two pieces of sugar:
+  - Positional primary arg: `read "x"` ≡ `read file="x"`, `upper "y"` ≡ `upper text="y"`.
+  - Pipe `|`: the upstream value flows into the next verb's primary arg, so
+    you don't have to name intermediates.
+
+---
+
+### Example 11 — Mixing pipe with named args
+
+USER:
+fetch users, keep adults, summarize
+
+ASSISTANT:
+```
+http_get "https://api.example.com/users" | filter where="x['age'] >= 18" | summarize -> note
+print note
+```
+
+---
+
 ### Anti-pattern reminders (do NOT do these)
 
 - ❌ `let x = read("data.csv")`  (no `let`, no parens; use `read file=data.csv -> x`)

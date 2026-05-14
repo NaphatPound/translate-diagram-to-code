@@ -10,5 +10,6 @@ venv/
 *.swp
 .idea/
 .vscode/
+.claude/
 build/
 dist/

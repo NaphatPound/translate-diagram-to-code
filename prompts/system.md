@@ -29,6 +29,20 @@ follow these rules exactly. The parser is strict; deviations will fail.
 10. List and dict literals are supported:
     - List: `[1, 2, 3]` or `["a", "b"]`
     - Dict: `{name: "alice", age: 30}` (identifier keys) or `{"key": value, ...}`
+11. **Pipe shorthand** — chain calls with `|`. The upstream value becomes the
+    next verb's primary arg automatically. Use this to skip naming intermediates.
+        read "a.csv" | upper | print
+    is equivalent to:
+        read file="a.csv" -> _p1
+        upper text=_p1 -> _p2
+        print value=_p2
+12. **Positional primary arg** — many verbs accept the first arg unnamed:
+        print "hi"           ≡ print value="hi"
+        upper "abc" -> big   ≡ upper text="abc" -> big
+        read "data.csv" -> rows
+    Primary args: read.file, write.text, print.value, upper/lower/trim.text,
+    filter/map/sort.from, count.of, http_get.url, ask_ai.prompt, summarize.input,
+    translate.text, wait.seconds, format.template.
 
 ## Verb categories (you may only use these verbs)
 

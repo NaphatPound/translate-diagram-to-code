@@ -118,14 +118,45 @@ class _Compiler:
     def emit_call(self, call: Call) -> None:
         spec = VERBS.get(call.verb)
         if spec is None:
-            raise CompileError(f"unknown verb {call.verb!r} (not in registry)", call.line)
+            suggestion = _did_you_mean(call.verb, VERBS.keys())
+            extra = f". Did you mean {suggestion!r}?" if suggestion else ""
+            raise CompileError(
+                f"unknown verb {call.verb!r} (not in registry){extra}", call.line,
+            )
+
+        # Resolve implicit args (<pos> from positional, <pipe> from pipeline)
+        # to the verb's declared primary_arg.
+        resolved_args: List[Arg] = []
+        for a in call.args:
+            if a.name in ("<pos>", "<pipe>"):
+                if not spec.primary_arg:
+                    label = "positional value" if a.name == "<pos>" else "pipe input"
+                    raise CompileError(
+                        f"verb {call.verb!r} does not accept a {label} "
+                        f"(no primary arg declared); use named args.",
+                        call.line,
+                    )
+                resolved_args.append(Arg(spec.primary_arg, a.value))
+            else:
+                resolved_args.append(a)
+        call.args = resolved_args
 
         # Validate args
+        seen: Set[str] = set()
         for a in call.args:
+            if a.name in seen:
+                raise CompileError(
+                    f"duplicate arg {a.name!r} on verb {call.verb!r}",
+                    call.line,
+                )
+            seen.add(a.name)
             if a.name not in spec.args:
                 allowed = ", ".join(sorted(spec.args.keys())) or "(none)"
+                suggestion = _did_you_mean(a.name, spec.args.keys())
+                hint = f". Did you mean {suggestion!r}?" if suggestion else ""
                 raise CompileError(
-                    f"verb {call.verb!r} doesn't accept arg {a.name!r}. Allowed: {allowed}",
+                    f"verb {call.verb!r} doesn't accept arg {a.name!r}{hint}. "
+                    f"Allowed: {allowed}",
                     call.line,
                 )
 
@@ -444,3 +475,34 @@ class _Compiler:
 def _pairs_by_name(args: List[Arg]):
     for a in args:
         yield a.name, a
+
+
+def _did_you_mean(needle: str, candidates) -> str:
+    """Return the closest candidate by edit distance, or '' if none is close."""
+    needle = needle.lower()
+    best, best_d = "", 99
+    for c in candidates:
+        d = _edit_distance(needle, c.lower())
+        if d < best_d:
+            best, best_d = c, d
+    # Threshold: at most one third the length of the needle, min 1, max 4.
+    threshold = max(1, min(4, len(needle) // 3 + 1))
+    return best if best_d <= threshold else ""
+
+
+def _edit_distance(a: str, b: str) -> int:
+    """Levenshtein distance (small inputs, simple DP)."""
+    if a == b:
+        return 0
+    if len(a) < len(b):
+        a, b = b, a
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        curr = [i]
+        for j, cb in enumerate(b, 1):
+            ins = curr[j - 1] + 1
+            dele = prev[j] + 1
+            sub = prev[j - 1] + (0 if ca == cb else 1)
+            curr.append(min(ins, dele, sub))
+        prev = curr
+    return prev[-1]

@@ -32,6 +32,11 @@ class VerbSpec:
     # ^ args whose string value is embedded raw (no quoting). Use for
     # predicates / expressions like 'where', 'by'. Inside these expressions,
     # the loop item is bound to `x`.
+    primary_arg: str = ""
+    # ^ The argument that receives the positional value (e.g. `print "hi"`
+    # → primary_arg="value"). Also used as the pipe target: `... | upper`
+    # feeds the upstream value into this arg. Leave empty to require all
+    # args be named.
 
 
 VERBS: Dict[str, VerbSpec] = {}
@@ -41,8 +46,12 @@ def register_verb(spec: VerbSpec) -> None:
     VERBS[spec.name] = spec
 
 
-def _v(name, category, summary, args, returns=False, raw_args=None, **templates):
-    register_verb(VerbSpec(name, category, summary, args, returns, templates, raw_args or []))
+def _v(name, category, summary, args, returns=False, raw_args=None,
+       primary=None, **templates):
+    register_verb(VerbSpec(
+        name, category, summary, args, returns, templates,
+        raw_args or [], primary or "",
+    ))
 
 
 # ============================================================
@@ -382,3 +391,30 @@ _add("wait",   bash='sleep {seconds}')
 
 _add("http_get", bash='{out}=$(curl -fsSL {url})')
 _add("download", bash='curl -fsSL {url} -o {to}')
+
+
+# ============================================================
+# Primary-arg marks (positional + pipe target)
+# ============================================================
+# These let the parser accept compact forms:
+#   print "hi"             ≡ print value="hi"
+#   read "a.csv" | upper   ≡ read file="a.csv" -> _p1 ; upper text=_p1
+_PRIMARY = {
+    "read": "file", "write": "text", "print": "value", "ask": "prompt",
+    "load": "file", "save": "value",
+    "filter": "from", "map": "from", "sort": "from",
+    "take": "from", "skip": "from",
+    "count": "of", "join": "from", "split": "text",
+    "sum": "of", "avg": "of", "min": "of", "max": "of",
+    "round": "value",
+    "format": "template",
+    "upper": "text", "lower": "text", "trim": "text",
+    "replace": "text", "contains": "text",
+    "wait": "seconds",
+    "http_get": "url", "http_post": "url", "download": "url",
+    "ask_ai": "prompt", "classify": "input",
+    "summarize": "input", "translate": "text",
+}
+for _name, _p in _PRIMARY.items():
+    if _name in VERBS:
+        VERBS[_name].primary_arg = _p

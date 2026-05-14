@@ -165,6 +165,7 @@ TOKEN_SPEC = [
     ("STRING", r'"(?:\\.|[^"\\\n])*"'),
     ("ARROW", r"->"),
     ("CMP", r">=|<=|==|!="),
+    ("PIPE", r"\|"),
     ("OP", r"[=<>+\-*/]"),
     ("NUMBER", r"\d+(?:\.\d+)?"),
     ("LPAREN", r"\("),
@@ -279,6 +280,7 @@ class _Parser:
     def __init__(self, lines: List[_Line]):
         self.lines = lines
         self.idx = 0
+        self.pipe_counter = 0
 
     def parse_program(self) -> Program:
         body, _ = self._parse_block(0)
@@ -302,7 +304,10 @@ class _Parser:
                     1,
                 )
             stmt = self._parse_stmt(base_indent)
-            body.append(stmt)
+            if isinstance(stmt, list):   # pipeline → list of calls
+                body.extend(stmt)
+            else:
+                body.append(stmt)
         return body, self.idx
 
     def _parse_stmt(self, base_indent: int) -> Stmt:
@@ -320,25 +325,68 @@ class _Parser:
         if first.kind == "KW_ELSE":
             raise ParseError("'else' without matching 'if'", line.line_no, 1)
         if first.kind in ("WORD",):
-            return self._parse_call(line)
+            return self._parse_pipeline(line)
         raise ParseError(
             f"expected verb or keyword, got {first.value!r}", first.line, first.col
         )
 
-    # ---------- call (action block) ----------
+    # ---------- pipeline / call ----------
 
-    def _parse_call(self, line: _Line) -> Call:
+    def _parse_pipeline(self, line: _Line):
+        """Parse a (possibly piped) call line. Returns Call or List[Call]."""
         toks = line.tokens
-        if toks[0].kind != "WORD":
-            raise ParseError(f"verb must be a name, got {toks[0].value!r}", toks[0].line, toks[0].col)
-        verb = toks[0].value
+        calls: List[Call] = []
+        i = 0
+        pipe_in: Optional[str] = None
+        while i < len(toks):
+            call, i = self._parse_call_segment(toks, i, line.line_no, pipe_in)
+            calls.append(call)
+            if i >= len(toks):
+                break
+            if toks[i].kind != "PIPE":
+                raise ParseError(
+                    f"unexpected token after call: {toks[i].value!r}",
+                    toks[i].line, toks[i].col,
+                )
+            # Pipe: the previous call must have an output name (auto-assign if not).
+            i += 1
+            if call.out is None:
+                call.out = self._fresh_pipe_name()
+            pipe_in = call.out
+        self.idx += 1
+        return calls if len(calls) > 1 else calls[0]
+
+    def _fresh_pipe_name(self) -> str:
+        self.pipe_counter += 1
+        return f"_p{self.pipe_counter}"
+
+    def _parse_call_segment(self, toks: List[Token], i: int, line_no: int,
+                            pipe_in: Optional[str]) -> Tuple[Call, int]:
+        """Parse one verb-and-args segment. Stops at PIPE or end of tokens."""
+        if toks[i].kind != "WORD":
+            raise ParseError(f"verb must be a name, got {toks[i].value!r}",
+                             toks[i].line, toks[i].col)
+        verb = toks[i].value
         if not _is_ident(verb):
-            raise ParseError(f"verb name must be a plain identifier (got {verb!r})", toks[0].line, toks[0].col)
-        i = 1
+            raise ParseError(f"verb name must be a plain identifier (got {verb!r})",
+                             toks[i].line, toks[i].col)
+        i += 1
         args: List[Arg] = []
         out: Optional[str] = None
-        # parse args and optional -> name
-        while i < len(toks):
+
+        # Inject pipe input as <pipe> arg — compiler resolves to primary_arg.
+        if pipe_in is not None:
+            args.append(Arg("<pipe>", Name([pipe_in])))
+
+        # Optional positional value first: `print "hi"` ≡ `print value="hi"`.
+        # Only consume if the next token is a value-starter that is NOT an
+        # `ident =` pair (which would be a named arg).
+        if i < len(toks) and self._looks_like_positional(toks, i):
+            value, i = self._parse_value(toks, i, line_no)
+            args.append(Arg("<pos>", value))
+
+        # Named args + optional ->name; stop at PIPE.
+        while i < len(toks) and toks[i].kind != "PIPE":
             t = toks[i]
             if t.kind == "ARROW":
                 if i + 1 >= len(toks):
@@ -350,14 +398,15 @@ class _Parser:
                         name_tok.line, name_tok.col,
                     )
                 out = name_tok.value
-                if i + 2 < len(toks):
-                    extra = toks[i + 2]
+                i += 2
+                if i < len(toks) and toks[i].kind != "PIPE":
+                    extra = toks[i]
                     raise ParseError(
                         f"unexpected token after output name: {extra.value!r}",
                         extra.line, extra.col,
                     )
                 break
-            # parse arg: NAME '=' VALUE
+            # Must be: NAME '=' VALUE
             if t.kind != "WORD" or not _is_ident(t.value):
                 raise ParseError(
                     f"expected arg name (got {t.value!r}); did you forget '=' ?",
@@ -369,11 +418,23 @@ class _Parser:
                     f"arg {arg_name!r} must be followed by '='",
                     t.line, t.col,
                 )
-            i += 2  # skip name and '='
-            value, i = self._parse_value(toks, i, line.line_no)
+            i += 2
+            value, i = self._parse_value(toks, i, line_no)
             args.append(Arg(arg_name, value))
-        self.idx += 1
-        return Call(verb=verb, args=args, out=out, line=line.line_no)
+
+        return Call(verb=verb, args=args, out=out, line=line_no), i
+
+    def _looks_like_positional(self, toks: List[Token], i: int) -> bool:
+        """True if toks[i] starts a value AND is not an `ident =` pair."""
+        t = toks[i]
+        # `ident =` (named arg) — not positional
+        if t.kind == "WORD" and _is_ident(t.value):
+            if i + 1 < len(toks) and toks[i + 1].kind == "OP" and toks[i + 1].value == "=":
+                return False
+        if t.kind in ("STRING", "NUMBER", "LBRACK", "LBRACE",
+                      "KW_TRUE", "KW_FALSE", "WORD"):
+            return True
+        return False
 
     # ---------- value / expression ----------
 
