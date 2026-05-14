@@ -19,7 +19,7 @@ from typing import List
 from .parser import (
     Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhenStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, Arg,
-    ListLit, DictLit, Ternary, Range,
+    ListLit, DictLit, Ternary, Range, FString,
 )
 
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -210,6 +210,10 @@ def _count_in_value(value, counts):
     elif isinstance(value, DictLit):
         for _, v in value.entries:
             _count_in_value(v, counts)
+    elif isinstance(value, FString):
+        for kind, payload in value.parts:
+            if kind == "var":
+                counts[payload] = counts.get(payload, 0) + 1
 
 
 # ---------- calls ----------
@@ -305,4 +309,12 @@ def _fmt_value(v) -> str:
         return f"({_fmt_value(v.cond)} ? {_fmt_value(v.then)} : {_fmt_value(v.else_)})"
     if isinstance(v, Range):
         return f"{_fmt_value(v.start)}..{_fmt_value(v.end)}"
+    if isinstance(v, FString):
+        body = ""
+        for kind, payload in v.parts:
+            if kind == "text":
+                body += payload.replace('"', '\\"')
+            else:
+                body += "{" + payload + "}"
+        return f'f"{body}"'
     raise ValueError(f"unknown value type: {type(v).__name__}")

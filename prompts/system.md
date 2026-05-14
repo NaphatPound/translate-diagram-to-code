@@ -69,6 +69,11 @@ follow these rules exactly. The parser is strict; deviations will fail.
     semantics). Use this instead of `if count(items) > 0`. JS targets compile
     differently — prefer the explicit `count(items) > 0` if you need
     cross-language portability.
+19. **F-string interpolation** `f"..."` — references in `{name}` are pulled from
+    scope. Way shorter than the `format` verb:
+        p f"hi {name}, age {age}"      # ≡ format template=... data=... + print
+    Escape a literal `{` by writing `\{`. Compiles natively to each target
+    (Python f-string, JS template literal, Go `Sprintf`, Rust `format!`, Bash).
 
 ## Verb categories (you may only use these verbs)
 

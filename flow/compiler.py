@@ -21,7 +21,7 @@ from typing import List, Set
 from .parser import (
     Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhenStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, Arg,
-    ListLit, DictLit, Ternary, Range,
+    ListLit, DictLit, Ternary, Range, FString,
 )
 
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -50,7 +50,38 @@ def compile_to(program: Program, lang: str) -> str:
                            f"(supported: {', '.join(SUPPORTED_LANGS)})")
     c = _Compiler(lang)
     c.emit_program(program)
-    return c.source()
+    src = c.source()
+    if lang == "python":
+        src = _hoist_python_imports(src)
+    return src
+
+
+_PY_INLINE_IMPORT_RE = re.compile(
+    r"^(import\s+[A-Za-z_][\w.]*(?:\s+as\s+[A-Za-z_]\w*)?)\s*;\s*(.*)$"
+)
+
+
+def _hoist_python_imports(src: str) -> str:
+    """Pull `import X as _Y;` prefixes off each line, dedupe, and put a single
+    block of imports at the top of the file."""
+    imports: list = []
+    seen: set = set()
+    out_lines: list = []
+    for line in src.split("\n"):
+        stripped = line.lstrip(" ")
+        indent = line[:len(line) - len(stripped)]
+        while True:
+            m = _PY_INLINE_IMPORT_RE.match(stripped)
+            if not m:
+                break
+            imp = m.group(1)
+            if imp not in seen:
+                seen.add(imp)
+                imports.append(imp)
+            stripped = m.group(2)
+        out_lines.append(indent + stripped if stripped else "")
+    header = ("\n".join(imports) + "\n\n") if imports else ""
+    return header + "\n".join(out_lines)
 
 
 # ============================================================
@@ -466,6 +497,8 @@ class _Compiler:
                 # Bash: `[[ cond ]] && echo a || echo b` in a subshell.
                 return f"$(if (( {cond} )); then echo {then}; else echo {else_}; fi)"
             raise CompileError(f"ternary not supported for lang {self.lang!r}")
+        if isinstance(v, FString):
+            return self._render_fstring(v)
         if isinstance(v, Range):
             s = self._render_value(v.start)
             e = self._render_value(v.end)
@@ -535,10 +568,78 @@ class _Compiler:
     def _str_literal(self, s: str) -> str:
         return json.dumps(s, ensure_ascii=False)
 
+    def _render_fstring(self, fs: FString) -> str:
+        """Render `f"..."` per target language. Variables that aren't in
+        scope are rendered as literal text (consistent with how bareword
+        Names degrade to strings)."""
+        if self.lang == "python":
+            buf = []
+            for kind, payload in fs.parts:
+                if kind == "text":
+                    buf.append(_escape_for_fstring(payload, "python"))
+                else:
+                    buf.append("{" + payload + "}")
+            return 'f"' + "".join(buf) + '"'
+        if self.lang == "js":
+            buf = []
+            for kind, payload in fs.parts:
+                if kind == "text":
+                    buf.append(_escape_for_fstring(payload, "js"))
+                else:
+                    buf.append("${" + payload + "}")
+            return "`" + "".join(buf) + "`"
+        if self.lang == "go":
+            fmt = ""
+            args = []
+            for kind, payload in fs.parts:
+                if kind == "text":
+                    fmt += payload.replace("%", "%%")
+                else:
+                    fmt += "%v"
+                    args.append(payload)
+            quoted = json.dumps(fmt, ensure_ascii=False)
+            if args:
+                return f"fmt.Sprintf({quoted}, {', '.join(args)})"
+            return quoted
+        if self.lang == "rust":
+            fmt = ""
+            args = []
+            for kind, payload in fs.parts:
+                if kind == "text":
+                    fmt += payload.replace("{", "{{").replace("}", "}}")
+                else:
+                    fmt += "{}"
+                    args.append(payload)
+            quoted = json.dumps(fmt, ensure_ascii=False)
+            if args:
+                return f"format!({quoted}, {', '.join(args)})"
+            return quoted
+        if self.lang == "bash":
+            buf = []
+            for kind, payload in fs.parts:
+                if kind == "text":
+                    buf.append(payload)
+                else:
+                    buf.append("${" + payload + "}")
+            return '"' + "".join(buf).replace('"', '\\"') + '"'
+        raise CompileError(f"f-string not supported for lang {self.lang!r}")
+
 
 def _pairs_by_name(args: List[Arg]):
     for a in args:
         yield a.name, a
+
+
+def _escape_for_fstring(text: str, lang: str) -> str:
+    """Escape literal-text segments of an f-string for the target's own
+    string/template syntax."""
+    if lang == "python":
+        # f-string: `{` and `}` must be doubled; `"` must be escaped.
+        return text.replace("\\", "\\\\").replace('"', '\\"').replace("{", "{{").replace("}", "}}")
+    if lang == "js":
+        # Template literal: `${` is the interpolation marker; escape `\``, `\\`, `\${`.
+        return text.replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${")
+    return text
 
 
 def _did_you_mean(needle: str, candidates) -> str:

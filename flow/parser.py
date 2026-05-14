@@ -27,7 +27,7 @@ from typing import List, Optional, Union, Tuple, Any
 # AST
 # ============================================================
 
-Value = Union["StringLit", "NumberLit", "BoolLit", "Name", "FuncCall", "BinOp", "ListLit", "DictLit", "Ternary", "Range"]
+Value = Union["StringLit", "NumberLit", "BoolLit", "Name", "FuncCall", "BinOp", "ListLit", "DictLit", "Ternary", "Range", "FString"]
 Stmt = Union["Call", "AssignStmt", "IfStmt", "EachStmt", "RepeatStmt", "WhenStmt"]
 
 
@@ -98,6 +98,18 @@ class Range:
     start: Value
     end: Value
     kind: str = "range"
+
+
+@dataclass
+class FString:
+    """Interpolated string: `f"hi {name}, age {age}"`.
+
+    Parts are tuples ("text" | "var", payload). "text" payload is a literal
+    fragment; "var" payload is a Flow identifier referencing a variable in
+    scope.
+    """
+    parts: List[Tuple[str, str]]
+    kind: str = "fstring"
 
 
 @dataclass
@@ -202,6 +214,7 @@ VERB_ALIASES = {
 
 # Order matters: longer / more-specific patterns first.
 TOKEN_SPEC = [
+    ("FSTRING", r'f"(?:\\.|[^"\\\n])*"'),
     ("STRING", r'"(?:\\.|[^"\\\n])*"'),
     ("ARROW", r"->"),
     ("CMP", r">=|<=|==|!="),
@@ -251,6 +264,10 @@ def _tokenize_line(text: str, line_no: int) -> List[Token]:
             kind = f"KW_{value.upper()}"
         if kind == "STRING":
             value = _unescape(value[1:-1])
+        if kind == "FSTRING":
+            # Strip leading `f` and surrounding quotes; keep raw content
+            # so the parser can split `{name}` placeholders.
+            value = _unescape(value[2:-1])
         tokens.append(Token(kind, value, line_no, pos + 1))
         pos = m.end()
     return tokens
@@ -499,7 +516,7 @@ class _Parser:
         if t.kind == "WORD" and _is_ident(t.value):
             if i + 1 < len(toks) and toks[i + 1].kind == "OP" and toks[i + 1].value == "=":
                 return False
-        if t.kind in ("STRING", "NUMBER", "LBRACK", "LBRACE", "LPAREN",
+        if t.kind in ("STRING", "FSTRING", "NUMBER", "LBRACK", "LBRACE", "LPAREN",
                       "KW_TRUE", "KW_FALSE", "WORD"):
             return True
         return False
@@ -524,6 +541,8 @@ class _Parser:
         t = toks[i]
         if t.kind == "STRING":
             return StringLit(t.value), i + 1
+        if t.kind == "FSTRING":
+            return _parse_fstring(t.value, t.line, t.col), i + 1
         if t.kind == "NUMBER":
             return NumberLit(float(t.value) if "." in t.value else float(int(t.value))), i + 1
         if t.kind == "KW_TRUE":
@@ -753,6 +772,28 @@ def _is_ident(s: str) -> bool:
 def _split_word_path(w: str) -> List[str]:
     """Split a WORD token into dotted parts. Filenames like 'data.csv' → ['data','csv']."""
     return w.split(".")
+
+
+_FSTRING_PLACEHOLDER = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def _parse_fstring(content: str, line: int, col: int) -> "FString":
+    """Split `hi {name}, age {age}` into [("text", "hi "), ("var", "name"),
+    ("text", ", age "), ("var", "age")]. Escape `\\{` to keep a literal `{`."""
+    parts: List[Tuple[str, str]] = []
+    pos = 0
+    while pos < len(content):
+        m = _FSTRING_PLACEHOLDER.search(content, pos)
+        if not m:
+            parts.append(("text", content[pos:]))
+            break
+        if m.start() > pos:
+            parts.append(("text", content[pos:m.start()]))
+        parts.append(("var", m.group(1)))
+        pos = m.end()
+    # Filter out empty text parts for cleaner downstream handling.
+    parts = [p for p in parts if not (p[0] == "text" and p[1] == "")]
+    return FString(parts=parts)
 
 
 # ============================================================
