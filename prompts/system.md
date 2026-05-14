@@ -57,6 +57,18 @@ follow these rules exactly. The parser is strict; deviations will fail.
         msg = x > 0 ? "big" : "small"     # one line instead of 4
         print (x > 0 ? "yes" : "no")
     Use parens if the ternary is inside a function call's arg value.
+16. **Range literal** `start..end` (inclusive) — much shorter than spelled-out lists:
+        xs = 1..10                  # equivalent to [1, 2, ..., 10]
+        each i in 0..n              # walks 0, 1, ..., n
+        t = sum(1..100)             # 5050
+17. **Repeat with loop variable** `repeat N as i` — exposes the iteration index:
+        repeat 5 as i
+          p i                       # 0, 1, 2, 3, 4
+    Drop `as i` if you don't need the index: just `repeat 5`.
+18. **Truthy if** for lists/strings: `if items` is true when non-empty (Python
+    semantics). Use this instead of `if count(items) > 0`. JS targets compile
+    differently — prefer the explicit `count(items) > 0` if you need
+    cross-language portability.
 
 ## Verb categories (you may only use these verbs)
 

@@ -19,7 +19,7 @@ from typing import List
 from .parser import (
     Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhenStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, Arg,
-    ListLit, DictLit, Ternary,
+    ListLit, DictLit, Ternary, Range,
 )
 
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -71,7 +71,10 @@ def _emit_stmt(stmt, depth: int, out: List[str], usage: dict) -> None:
         _emit_block(stmt.body, depth + 1, out, usage)
         return
     if isinstance(stmt, RepeatStmt):
-        out.append(f"{_INDENT * depth}repeat {_fmt_value(stmt.count)}")
+        head = f"repeat {_fmt_value(stmt.count)}"
+        if stmt.var:
+            head += f" as {stmt.var}"
+        out.append(_INDENT * depth + head)
         _emit_block(stmt.body, depth + 1, out, usage)
         return
     if isinstance(stmt, WhenStmt):
@@ -198,6 +201,9 @@ def _count_in_value(value, counts):
         _count_in_value(value.cond, counts)
         _count_in_value(value.then, counts)
         _count_in_value(value.else_, counts)
+    elif isinstance(value, Range):
+        _count_in_value(value.start, counts)
+        _count_in_value(value.end, counts)
     elif isinstance(value, ListLit):
         for x in value.items:
             _count_in_value(x, counts)
@@ -297,4 +303,6 @@ def _fmt_value(v) -> str:
         return "{" + ", ".join(parts) + "}"
     if isinstance(v, Ternary):
         return f"({_fmt_value(v.cond)} ? {_fmt_value(v.then)} : {_fmt_value(v.else_)})"
+    if isinstance(v, Range):
+        return f"{_fmt_value(v.start)}..{_fmt_value(v.end)}"
     raise ValueError(f"unknown value type: {type(v).__name__}")

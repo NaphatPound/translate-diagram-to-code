@@ -32,7 +32,7 @@ from typing import List, Optional
 from . import parse
 from .parser import (
     Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhenStmt,
-    StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, ListLit, DictLit, Ternary, Arg,
+    StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, ListLit, DictLit, Ternary, Range, Arg,
 )
 from .formatter import format_source
 
@@ -197,6 +197,8 @@ def _is_safe_to_inline(value) -> bool:
         return (_is_safe_to_inline(value.cond)
                 and _is_safe_to_inline(value.then)
                 and _is_safe_to_inline(value.else_))
+    if isinstance(value, Range):
+        return _is_safe_to_inline(value.start) and _is_safe_to_inline(value.end)
     if isinstance(value, ListLit):
         return all(_is_safe_to_inline(x) for x in value.items)
     if isinstance(value, DictLit):
@@ -246,6 +248,9 @@ def _count_in_value(value, counts) -> None:
         _count_in_value(value.cond, counts)
         _count_in_value(value.then, counts)
         _count_in_value(value.else_, counts)
+    elif isinstance(value, Range):
+        _count_in_value(value.start, counts)
+        _count_in_value(value.end, counts)
     elif isinstance(value, ListLit):
         for x in value.items:
             _count_in_value(x, counts)
@@ -302,6 +307,9 @@ def _replace_value(value, inlines, _expanding=None):
         return Ternary(_replace_value(value.cond, inlines, _expanding),
                        _replace_value(value.then, inlines, _expanding),
                        _replace_value(value.else_, inlines, _expanding))
+    if isinstance(value, Range):
+        return Range(_replace_value(value.start, inlines, _expanding),
+                     _replace_value(value.end, inlines, _expanding))
     if isinstance(value, ListLit):
         return ListLit([_replace_value(x, inlines, _expanding) for x in value.items])
     if isinstance(value, DictLit):

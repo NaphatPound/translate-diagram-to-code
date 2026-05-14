@@ -27,7 +27,7 @@ from typing import List, Optional, Union, Tuple, Any
 # AST
 # ============================================================
 
-Value = Union["StringLit", "NumberLit", "BoolLit", "Name", "FuncCall", "BinOp", "ListLit", "DictLit", "Ternary"]
+Value = Union["StringLit", "NumberLit", "BoolLit", "Name", "FuncCall", "BinOp", "ListLit", "DictLit", "Ternary", "Range"]
 Stmt = Union["Call", "AssignStmt", "IfStmt", "EachStmt", "RepeatStmt", "WhenStmt"]
 
 
@@ -93,6 +93,14 @@ class Ternary:
 
 
 @dataclass
+class Range:
+    """Inclusive integer range literal: `start..end` ≡ list [start..end]."""
+    start: Value
+    end: Value
+    kind: str = "range"
+
+
+@dataclass
 class Arg:
     name: str
     value: Value
@@ -138,6 +146,7 @@ class RepeatStmt:
     count: Value
     body: List[Stmt]
     line: int
+    var: Optional[str] = None   # `repeat N as i` binds i to 0..N-1 in body
     kind: str = "repeat"
 
 
@@ -174,7 +183,7 @@ class ParseError(Exception):
 # Tokenizer
 # ============================================================
 
-KEYWORDS = {"if", "else", "each", "in", "repeat", "when", "and", "or", "not", "true", "false"}
+KEYWORDS = {"if", "else", "each", "in", "repeat", "when", "as", "and", "or", "not", "true", "false"}
 
 # Single-letter aliases for the most common verbs. The parser substitutes
 # the canonical name before constructing the Call node.
@@ -196,6 +205,7 @@ TOKEN_SPEC = [
     ("STRING", r'"(?:\\.|[^"\\\n])*"'),
     ("ARROW", r"->"),
     ("CMP", r">=|<=|==|!="),
+    ("DOTDOT", r"\.\."),
     ("PIPE", r"\|"),
     ("QMARK", r"\?"),
     ("OP", r"[=<>+\-*/]"),
@@ -497,7 +507,18 @@ class _Parser:
     # ---------- value / expression ----------
 
     def _parse_value(self, toks: List[Token], i: int, line_no: int) -> Tuple[Value, int]:
-        """Parse a single value starting at toks[i]. Returns (value, new_i)."""
+        """Parse a single value starting at toks[i]. Returns (value, new_i).
+        Trailing `..end` is consumed to form a Range.
+        """
+        v, i = self._parse_primary(toks, i, line_no)
+        # Range literal: <primary>..<primary>
+        if i < len(toks) and toks[i].kind == "DOTDOT":
+            i += 1
+            end, i = self._parse_primary(toks, i, line_no)
+            v = Range(start=v, end=end)
+        return v, i
+
+    def _parse_primary(self, toks: List[Token], i: int, line_no: int) -> Tuple[Value, int]:
         if i >= len(toks):
             raise ParseError("expected a value", line_no, 1)
         t = toks[i]
@@ -514,7 +535,6 @@ class _Parser:
         if t.kind == "LBRACE":
             return self._parse_dict(toks, i, line_no)
         if t.kind == "LPAREN":
-            # Parenthesized expression: full expr (ternary, binary, etc.).
             i += 1
             expr, i = self._parse_expr(toks, i, line_no)
             if i >= len(toks) or toks[i].kind != "RPAREN":
@@ -525,8 +545,6 @@ class _Parser:
                 )
             return expr, i + 1
         if t.kind == "WORD":
-            # Could be: ident, ident.ident.ident, ident(args), or filename-like
-            # If followed by '(' → FuncCall
             if i + 1 < len(toks) and toks[i + 1].kind == "LPAREN":
                 return self._parse_funccall(toks, i, line_no)
             parts = _split_word_path(t.value)
@@ -683,12 +701,22 @@ class _Parser:
         if len(toks) < 2:
             raise ParseError("'repeat' needs a count: repeat <number-or-name>", line.line_no, 1)
         count, i = self._parse_value(toks, 1, line.line_no)
+        var: Optional[str] = None
+        if i < len(toks) and toks[i].kind == "KW_AS":
+            if i + 1 >= len(toks):
+                raise ParseError("expected variable name after 'as'", toks[i].line, toks[i].col)
+            name_tok = toks[i + 1]
+            if name_tok.kind != "WORD" or not _is_ident(name_tok.value):
+                raise ParseError(f"expected variable name after 'as', got {name_tok.value!r}",
+                                 name_tok.line, name_tok.col)
+            var = name_tok.value
+            i += 2
         if i != len(toks):
-            raise ParseError(f"unexpected token after repeat count: {toks[i].value!r}",
+            raise ParseError(f"unexpected token after repeat: {toks[i].value!r}",
                              toks[i].line, toks[i].col)
         self.idx += 1
         body, _ = self._parse_block(base_indent + 1)
-        return RepeatStmt(count, body, line.line_no)
+        return RepeatStmt(count, body, line.line_no, var=var)
 
     def _parse_when(self, base_indent: int) -> WhenStmt:
         line = self.lines[self.idx]

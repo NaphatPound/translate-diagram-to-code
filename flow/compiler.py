@@ -21,7 +21,7 @@ from typing import List, Set
 from .parser import (
     Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhenStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, Arg,
-    ListLit, DictLit, Ternary,
+    ListLit, DictLit, Ternary, Range,
 )
 
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -297,19 +297,29 @@ class _Compiler:
 
     def emit_repeat(self, stmt: RepeatStmt) -> None:
         count_src = self._render_value(stmt.count)
+        var_name = stmt.var or "_i"
         if self.lang == "python":
-            self._emit(f"for _ in range(int({count_src})):")
+            if stmt.var:
+                self._emit(f"for {var_name} in range(int({count_src})):")
+            else:
+                self._emit(f"for _ in range(int({count_src})):")
         elif self.lang == "js":
-            self._emit(f"for (let _i = 0; _i < ({count_src}); _i++) {{")
+            self._emit(f"for (let {var_name} = 0; {var_name} < ({count_src}); {var_name}++) {{")
         elif self.lang == "go":
-            self._emit(f"for _i := 0; _i < {count_src}; _i++ {{")
+            self._emit(f"for {var_name} := 0; {var_name} < {count_src}; {var_name}++ {{")
         elif self.lang == "rust":
-            self._emit(f"for _i in 0..({count_src}) {{")
+            self._emit(f"for {var_name} in 0..({count_src}) {{")
         elif self.lang == "bash":
-            self._emit(f"for _i in $(seq 1 {count_src}); do")
+            self._emit(f"for {var_name} in $(seq 0 $(({count_src} - 1))); do")
+        # Bring the loop var into scope while we emit the body.
+        prev_in_scope = var_name in self.scope
+        if stmt.var:
+            self.scope.add(stmt.var)
         self._block_open()
         for s in stmt.body:
             self.emit_stmt(s)
+        if stmt.var and not prev_in_scope:
+            self.scope.discard(stmt.var)
         if self.lang == "bash":
             self.indent -= 1
             self._emit("done")
@@ -456,6 +466,21 @@ class _Compiler:
                 # Bash: `[[ cond ]] && echo a || echo b` in a subshell.
                 return f"$(if (( {cond} )); then echo {then}; else echo {else_}; fi)"
             raise CompileError(f"ternary not supported for lang {self.lang!r}")
+        if isinstance(v, Range):
+            s = self._render_value(v.start)
+            e = self._render_value(v.end)
+            # Inclusive range: emit a concrete list per target lang.
+            if self.lang == "python":
+                return f"list(range({s}, {e} + 1))"
+            if self.lang == "js":
+                return f"Array.from({{length: ({e}) - ({s}) + 1}}, (_, i) => i + ({s}))"
+            if self.lang == "go":
+                return f"func() []int {{ var _r []int; for _i := {s}; _i <= {e}; _i++ {{ _r = append(_r, _i) }}; return _r }}()"
+            if self.lang == "rust":
+                return f"({s}..=({e})).collect::<Vec<_>>()"
+            if self.lang == "bash":
+                return f"$(seq {s} {e})"
+            raise CompileError(f"range not supported for lang {self.lang!r}")
         raise CompileError(f"cannot render value of type {type(v).__name__}")
 
     def _render_name(self, n: Name) -> str:
