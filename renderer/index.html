@@ -86,6 +86,25 @@
                     background: rgba(255,255,255,.03); border-radius: 4px;
                     border: 1px dashed rgba(255,255,255,.08); }
 
+  .lint-panel {
+    margin-top: 12px; padding: 8px;
+    background: rgba(245, 158, 11, 0.10);
+    border-left: 3px solid #f59e0b;
+    border-radius: 4px;
+    font-size: 11px; color: #fef3c7;
+  }
+  .lint-panel .lint-header {
+    font-weight: 700; margin-bottom: 4px; color: #fbbf24;
+    text-transform: uppercase; letter-spacing: 1px; font-size: 10px;
+  }
+  .lint-panel .lint-row {
+    padding: 4px 6px; margin: 2px 0; border-radius: 3px;
+    cursor: pointer; transition: background .08s;
+  }
+  .lint-panel .lint-row:hover { background: rgba(245, 158, 11, 0.18); }
+  .lint-panel .lint-row .lint-line { opacity: .6; min-width: 56px; display: inline-block; }
+  .lint-panel .lint-row .lint-suggest { color: #fde68a; font-weight: 600; }
+
   /* Block click affordance */
   .preview .block { cursor: pointer; }
   .preview .block:hover { outline: 2px solid rgba(0,0,0,.18); }
@@ -192,6 +211,7 @@
       <select id="examples-select" title="Load example">
         <option value="">— example —</option>
       </select>
+      <button id="btn-shrink" title="Rewrite source to the shortest equivalent">Shrink</button>
       <button id="btn-download" title="Download as .flow">Download</button>
       <button id="btn-upload" title="Open a .flow file">Upload</button>
       <input type="file" id="upload-input" accept=".flow,text/plain"/>
@@ -212,6 +232,7 @@
       <span class="tab" data-lang="bash">Bash</span>
     </div>
     <div id="compiled-wrap"></div>
+    <div id="lint-panel" class="lint-panel hidden"></div>
   </div>
   <div id="modal-root" class="hidden"></div>
 
@@ -583,8 +604,95 @@ function handleUpload(file) {
     srcEl.value = String(reader.result || '');
     refresh();
     scheduleCompile();
+    scheduleLint();
   };
   reader.readAsText(file);
+}
+
+async function shrinkSource() {
+  if (!serverAvailable) {
+    alert('Shrink needs the server. Run: python -m flow serve');
+    return;
+  }
+  try {
+    const r = await fetch('/api/shrink', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: srcEl.value }),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      srcEl.value = data.source;
+      refresh();
+      scheduleCompile();
+      scheduleLint();
+    } else {
+      alert('Shrink failed: ' + data.error);
+    }
+  } catch (e) {
+    alert('Shrink failed: ' + e.message);
+  }
+}
+
+const lintPanel = document.getElementById('lint-panel');
+let lintTimer = null;
+let lastLintSource = null;
+
+async function refreshLint() {
+  if (!serverAvailable) return;
+  if (srcEl.value === lastLintSource) return;
+  lastLintSource = srcEl.value;
+  try {
+    const r = await fetch('/api/lint', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: srcEl.value }),
+    });
+    const data = await r.json();
+    renderLint(data.warnings || []);
+  } catch (_) {}
+}
+
+function scheduleLint() {
+  clearTimeout(lintTimer);
+  lintTimer = setTimeout(refreshLint, 300);
+}
+
+function renderLint(warnings) {
+  if (!warnings.length) {
+    lintPanel.classList.add('hidden');
+    lintPanel.innerHTML = '';
+    return;
+  }
+  lintPanel.classList.remove('hidden');
+  let html = `<div class="lint-header">${warnings.length} suggestion${warnings.length > 1 ? 's' : ''} — click to apply</div>`;
+  for (const w of warnings) {
+    html += `<div class="lint-row" data-suggestion="${esc(w.suggestion)}" data-line="${w.line}">`;
+    html += `<span class="lint-line">line ${w.line}:</span> `;
+    html += `<span>${esc(w.message)}</span>`;
+    html += `<br><span class="lint-line"></span> → <span class="lint-suggest">${esc(w.suggestion)}</span>`;
+    html += `</div>`;
+  }
+  lintPanel.innerHTML = html;
+  lintPanel.querySelectorAll('.lint-row').forEach(row => {
+    row.addEventListener('click', () => applyLintSuggestion(row));
+  });
+}
+
+function applyLintSuggestion(row) {
+  const line = parseInt(row.dataset.line, 10);
+  const suggestion = row.dataset.suggestion;
+  if (!line || !suggestion) return;
+  const lines = srcEl.value.split('\n');
+  if (line < 1 || line > lines.length) return;
+  // Preserve original indentation of the line.
+  const orig = lines[line - 1];
+  const indent = (orig.match(/^( *)/) || ['', ''])[1];
+  lines[line - 1] = indent + suggestion;
+  srcEl.value = lines.join('\n');
+  refresh();
+  scheduleCompile();
+  scheduleLint();
 }
 
 // ---------------- block-edit modal ----------------
@@ -709,7 +817,7 @@ function refresh() {
   });
 }
 
-srcEl.addEventListener('input', () => { refresh(); scheduleCompile(); });
+srcEl.addEventListener('input', () => { refresh(); scheduleCompile(); scheduleLint(); });
 
 // Sample on first load
 srcEl.value = `# Workflow: fetch users, keep adults, summarize, save report
@@ -732,15 +840,16 @@ when start
 `;
 refresh();
 probeServer().then(() => {
-  if (serverAvailable) { recompile(); loadPalette(); loadExamples(); }
+  if (serverAvailable) { recompile(); loadPalette(); loadExamples(); refreshLint(); }
   else { showHint(); paletteEl.innerHTML = '<div style="font-size:11px;color:#94a3b8;padding:8px;">Palette unavailable<br>(needs <code>flow serve</code>)</div>'; }
 });
 
-// Examples dropdown + upload/download wiring
+// Toolbar wiring
 document.getElementById('examples-select').addEventListener('change', (e) => {
   loadExample(e.target.value);
-  e.target.value = ''; // reset so re-selecting same value works
+  e.target.value = '';
 });
+document.getElementById('btn-shrink').addEventListener('click', shrinkSource);
 document.getElementById('btn-download').addEventListener('click', downloadCurrent);
 document.getElementById('btn-upload').addEventListener('click', () => {
   document.getElementById('upload-input').click();

@@ -546,6 +546,9 @@ class _Parser:
         if t.kind in ("STRING", "FSTRING", "NUMBER", "LBRACK", "LBRACE", "LPAREN",
                       "KW_TRUE", "KW_FALSE", "WORD"):
             return True
+        # Unary minus at start of a value: -5, -name, -(expr)
+        if t.kind == "OP" and t.value == "-":
+            return True
         return False
 
     # ---------- value / expression ----------
@@ -610,6 +613,13 @@ class _Parser:
         if i >= len(toks):
             raise ParseError("expected a value", line_no, 1)
         t = toks[i]
+        # Unary minus: `-N`, `-x`, `-(expr)`. Implemented as 0 - inner, except
+        # we fold for literal numbers so `-5` stays a NumberLit.
+        if t.kind == "OP" and t.value == "-":
+            inner, j = self._parse_primary(toks, i + 1, line_no)
+            if isinstance(inner, NumberLit):
+                return NumberLit(-inner.value), j
+            return BinOp("-", NumberLit(0.0), inner), j
         if t.kind == "STRING":
             return StringLit(t.value), i + 1
         if t.kind == "FSTRING":

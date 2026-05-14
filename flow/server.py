@@ -199,6 +199,30 @@ class FlowHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"ok": True, "source": format_source(ast)})
             return
 
+        if path == "/api/shrink":
+            from .shrink import shrink_source
+            source = body.get("source") or ""
+            try:
+                out = shrink_source(source)
+            except ParseError as e:
+                self._send_json(200, {"ok": False, "error": str(e)})
+                return
+            self._send_json(200, {"ok": True, "source": out})
+            return
+
+        if path == "/api/lint":
+            from .lint import lint_source
+            source = body.get("source") or ""
+            warnings = lint_source(source)
+            self._send_json(200, {
+                "ok": True,
+                "warnings": [
+                    {"line": w.line, "message": w.message, "suggestion": w.suggestion}
+                    for w in warnings
+                ],
+            })
+            return
+
         self._send_text(404, "text/plain", b"not found")
 
 
