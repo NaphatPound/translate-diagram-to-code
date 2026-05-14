@@ -28,7 +28,7 @@ from typing import List, Optional, Union, Tuple, Any
 # ============================================================
 
 Value = Union["StringLit", "NumberLit", "BoolLit", "Name", "FuncCall", "BinOp", "ListLit", "DictLit"]
-Stmt = Union["Call", "IfStmt", "EachStmt", "RepeatStmt", "WhenStmt"]
+Stmt = Union["Call", "AssignStmt", "IfStmt", "EachStmt", "RepeatStmt", "WhenStmt"]
 
 
 @dataclass
@@ -100,6 +100,14 @@ class Call:
 
 
 @dataclass
+class AssignStmt:
+    target: str
+    value: Value
+    line: int
+    kind: str = "assign"
+
+
+@dataclass
 class IfStmt:
     cond: Value
     then: List[Stmt]
@@ -159,6 +167,21 @@ class ParseError(Exception):
 # ============================================================
 
 KEYWORDS = {"if", "else", "each", "in", "repeat", "when", "and", "or", "not", "true", "false"}
+
+# Single-letter aliases for the most common verbs. The parser substitutes
+# the canonical name before constructing the Call node.
+VERB_ALIASES = {
+    "p": "print",
+    "r": "read",
+    "w": "write",
+    "f": "filter",
+    "m": "map",
+    "c": "count",
+    "u": "upper",
+    "l": "lower",
+    "s": "sort",
+    "t": "trim",
+}
 
 # Order matters: longer / more-specific patterns first.
 TOKEN_SPEC = [
@@ -324,11 +347,35 @@ class _Parser:
             return self._parse_when(base_indent)
         if first.kind == "KW_ELSE":
             raise ParseError("'else' without matching 'if'", line.line_no, 1)
-        if first.kind in ("WORD",):
+        if first.kind == "WORD":
+            # Assignment: `name = expr`. Check that toks[1] is `=` (not `==`).
+            toks = line.tokens
+            if (len(toks) >= 3
+                    and toks[1].kind == "OP" and toks[1].value == "="):
+                return self._parse_assignment(line)
             return self._parse_pipeline(line)
         raise ParseError(
             f"expected verb or keyword, got {first.value!r}", first.line, first.col
         )
+
+    def _parse_assignment(self, line: _Line) -> "AssignStmt":
+        toks = line.tokens
+        target = toks[0].value
+        if not _is_ident(target):
+            raise ParseError(
+                f"assignment target must be a plain identifier (got {target!r})",
+                toks[0].line, toks[0].col,
+            )
+        # toks[1] is '=' (already verified by caller)
+        expr, i = self._parse_expr(toks, 2, line.line_no)
+        if i < len(toks):
+            extra = toks[i]
+            raise ParseError(
+                f"unexpected token after assignment expression: {extra.value!r}",
+                extra.line, extra.col,
+            )
+        self.idx += 1
+        return AssignStmt(target=target, value=expr, line=line.line_no)
 
     # ---------- pipeline / call ----------
 
@@ -370,6 +417,8 @@ class _Parser:
         if not _is_ident(verb):
             raise ParseError(f"verb name must be a plain identifier (got {verb!r})",
                              toks[i].line, toks[i].col)
+        # Expand single-letter aliases to canonical verb names.
+        verb = VERB_ALIASES.get(verb, verb)
         i += 1
         args: List[Arg] = []
         out: Optional[str] = None

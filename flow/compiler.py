@@ -19,7 +19,7 @@ import re
 from typing import List, Set
 
 from .parser import (
-    Program, Call, IfStmt, EachStmt, RepeatStmt, WhenStmt,
+    Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhenStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, Arg,
     ListLit, DictLit,
 )
@@ -104,6 +104,8 @@ class _Compiler:
     def emit_stmt(self, stmt) -> None:
         if isinstance(stmt, Call):
             self.emit_call(stmt)
+        elif isinstance(stmt, AssignStmt):
+            self.emit_assign(stmt)
         elif isinstance(stmt, IfStmt):
             self.emit_if(stmt)
         elif isinstance(stmt, EachStmt):
@@ -114,6 +116,28 @@ class _Compiler:
             self.emit_when(stmt)
         else:
             raise CompileError(f"unknown statement type: {type(stmt).__name__}")
+
+    def emit_assign(self, stmt: AssignStmt) -> None:
+        val_src = self._render_value(stmt.value)
+        # Bring target into scope BEFORE rendering, so a self-reference (rare,
+        # but `n = n + 1` style) resolves to the variable.
+        self.scope.add(stmt.target)
+        if self.lang == "python":
+            self._emit(f"{stmt.target} = {val_src}")
+        elif self.lang == "js":
+            # Use `let` so reassignment works; user can write multiple `n = ...`
+            # lines targeting the same variable.
+            self._emit(f"let {stmt.target} = {val_src};")
+        elif self.lang == "go":
+            self._emit(f"var {stmt.target} = {val_src}")
+        elif self.lang == "rust":
+            self._emit(f"let {stmt.target} = {val_src};")
+        elif self.lang == "bash":
+            # Bash: numeric expressions go through (( )); strings use plain =.
+            if isinstance(stmt.value, (NumberLit, BinOp)):
+                self._emit(f"{stmt.target}=$(( {val_src} ))")
+            else:
+                self._emit(f"{stmt.target}={val_src}")
 
     def emit_call(self, call: Call) -> None:
         spec = VERBS.get(call.verb)

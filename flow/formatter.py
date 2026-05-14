@@ -17,7 +17,7 @@ import re
 from typing import List
 
 from .parser import (
-    Program, Call, IfStmt, EachStmt, RepeatStmt, WhenStmt,
+    Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhenStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, Arg,
     ListLit, DictLit,
 )
@@ -40,6 +40,9 @@ def format_source(program: Program) -> str:
 def _emit_stmt(stmt, depth: int, out: List[str]) -> None:
     if isinstance(stmt, Call):
         out.append(_INDENT * depth + _fmt_call(stmt))
+        return
+    if isinstance(stmt, AssignStmt):
+        out.append(f"{_INDENT * depth}{stmt.target} = {_fmt_value(stmt.value)}")
         return
     if isinstance(stmt, IfStmt):
         out.append(_INDENT * depth + "if " + _fmt_value(stmt.cond))
@@ -75,11 +78,26 @@ def _emit_stmt(stmt, depth: int, out: List[str]) -> None:
 def _fmt_call(call: Call) -> str:
     parts = [call.verb]
     for a in call.args:
-        parts.append(f"{a.name}={_fmt_value(a.value)}")
+        name = _resolve_arg_name(call.verb, a.name)
+        parts.append(f"{name}={_fmt_value(a.value)}")
     line = " ".join(parts)
     if call.out:
         line += f" -> {call.out}"
     return line
+
+
+def _resolve_arg_name(verb: str, name: str) -> str:
+    """Translate the synthetic <pos> / <pipe> back to the verb's primary_arg."""
+    if name not in ("<pos>", "<pipe>"):
+        return name
+    try:
+        from .verbs import VERBS
+    except ImportError:
+        return name
+    spec = VERBS.get(verb)
+    if spec and spec.primary_arg:
+        return spec.primary_arg
+    return name
 
 
 # ---------- values ----------

@@ -185,6 +185,30 @@ print note
 
 ---
 
+### Example 12 — Assignment + aliases (shortest form)
+
+USER:
+sum the list [1, 2, 3, 4, 5] and print it.
+
+ASSISTANT (compact, preferred):
+```
+xs = [1, 2, 3, 4, 5]
+t = sum(xs)
+p t
+```
+
+ASSISTANT (longhand):
+```
+sum of=[1, 2, 3, 4, 5] -> t
+print value=t
+```
+
+Use `name = expr` for any math (`+`, `-`, `*`, `/`, comparisons) or function
+call on the RHS — it's shorter than calling add/sub/mul/div/count verbs.
+Single-letter aliases: p r w f m c u l s t. Pipe `|` for chains.
+
+---
+
 ### Anti-pattern reminders (do NOT do these)
 
 - ❌ `let x = read("data.csv")`  (no `let`, no parens; use `read file=data.csv -> x`)

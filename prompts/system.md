@@ -43,6 +43,16 @@ follow these rules exactly. The parser is strict; deviations will fail.
     Primary args: read.file, write.text, print.value, upper/lower/trim.text,
     filter/map/sort.from, count.of, http_get.url, ask_ai.prompt, summarize.input,
     translate.text, wait.seconds, format.template.
+13. **Assignment** — `name = expr` defines a variable directly. Use it for math
+    instead of add/sub/mul/div verbs:
+        s = 3 + 4              # not: add a=3 b=4 -> s
+        n = count(items)       # not: count of=items -> n
+        msg = upper("hello")   # also valid; funccall on RHS
+    Operators on RHS: + - * /, comparisons > < >= <= == != and/or/not.
+14. **Single-letter aliases** for the most common verbs. Use them to save tokens:
+        p (print)  r (read)   w (write)  f (filter)  m (map)
+        c (count)  u (upper)  l (lower)  s (sort)    t (trim)
+    Example: `r "a.csv" | f where="x.age>18" | p` ≡ the longhand equivalent.
 
 ## Verb categories (you may only use these verbs)
 
