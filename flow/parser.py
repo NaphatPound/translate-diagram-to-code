@@ -489,7 +489,7 @@ class _Parser:
         if t.kind == "WORD" and _is_ident(t.value):
             if i + 1 < len(toks) and toks[i + 1].kind == "OP" and toks[i + 1].value == "=":
                 return False
-        if t.kind in ("STRING", "NUMBER", "LBRACK", "LBRACE",
+        if t.kind in ("STRING", "NUMBER", "LBRACK", "LBRACE", "LPAREN",
                       "KW_TRUE", "KW_FALSE", "WORD"):
             return True
         return False

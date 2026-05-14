@@ -63,9 +63,12 @@ class TestLoop(unittest.TestCase):
     @patch("flow.gen._chat")
     def test_polish_shrinks_verbose_code(self, mock_chat):
         # Verbose first reply; deterministic shrink rewrites — no 2nd LLM call.
+        # Shrink should rewrite `add` → assignment AND inline the single-use
+        # result, producing `print (3 + 4)`.
         mock_chat.return_value = 'add a=3 b=4 -> s\nprint value=s'
         out = generate("3 + 4", retries=1, polish=True)
-        self.assertIn("s = 3 + 4", out)
+        self.assertNotIn("add a=", out)
+        self.assertIn("3 + 4", out)
         self.assertEqual(mock_chat.call_count, 1)
 
     @patch("flow.gen._chat")

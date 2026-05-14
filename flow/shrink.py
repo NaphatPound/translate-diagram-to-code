@@ -40,6 +40,10 @@ from .formatter import format_source
 MATH_TO_OP = {"add": "+", "sub": "-", "mul": "*", "div": "/"}
 AGGS = {"count", "sum", "min", "max", "avg"}
 
+# FuncCalls considered safe to inline (no side effects, deterministic).
+PURE_BUILTINS = {"count", "sum", "min", "max", "abs", "len", "round",
+                 "int", "float", "str"}
+
 
 def shrink_source(src: str) -> str:
     return format_source(shrink(parse(src)))
@@ -47,6 +51,7 @@ def shrink_source(src: str) -> str:
 
 def shrink(program: Program) -> Program:
     program.body = _shrink_block(program.body)
+    program = _inline_single_use(program)
     return program
 
 
@@ -139,3 +144,166 @@ def _arg(call: Call, name: str):
         if a.name == name:
             return a.value
     return None
+
+
+# ============================================================
+# Inline single-use assignments
+# ============================================================
+
+
+def _inline_single_use(program: Program) -> Program:
+    """`name = expr` whose `name` is used exactly once → drop the assignment
+    and substitute `expr` at the use site.
+
+    Only inlines when `expr` is a *safe* value: literals, names, simple
+    arithmetic, ternaries, or pure-builtin function calls. Skips RHS that
+    might have side effects (most FuncCalls).
+    """
+    counts: dict = {}
+    _count_in_body(program.body, counts)
+
+    # Collect single-use assignments with safe RHS.
+    inlines: dict = {}
+    for stmt in _walk_all(program.body):
+        if isinstance(stmt, AssignStmt) and counts.get(stmt.target, 0) == 1:
+            if _is_safe_to_inline(stmt.value):
+                inlines[stmt.target] = stmt.value
+
+    if not inlines:
+        return program
+
+    program.body = _replace_and_drop(program.body, inlines)
+    return program
+
+
+def _walk_all(body):
+    """Yield every statement in body and its nested children."""
+    for s in body:
+        yield s
+        if isinstance(s, IfStmt):
+            yield from _walk_all(s.then)
+            if s.else_:
+                yield from _walk_all(s.else_)
+        elif isinstance(s, (EachStmt, RepeatStmt, WhenStmt)):
+            yield from _walk_all(s.body)
+
+
+def _is_safe_to_inline(value) -> bool:
+    if isinstance(value, (StringLit, NumberLit, BoolLit, Name)):
+        return True
+    if isinstance(value, BinOp):
+        return _is_safe_to_inline(value.left) and _is_safe_to_inline(value.right)
+    if isinstance(value, Ternary):
+        return (_is_safe_to_inline(value.cond)
+                and _is_safe_to_inline(value.then)
+                and _is_safe_to_inline(value.else_))
+    if isinstance(value, ListLit):
+        return all(_is_safe_to_inline(x) for x in value.items)
+    if isinstance(value, DictLit):
+        return all(_is_safe_to_inline(v) for _, v in value.entries)
+    if isinstance(value, FuncCall):
+        if value.name not in PURE_BUILTINS:
+            return False
+        return all(_is_safe_to_inline(a) for a in value.args)
+    return False
+
+
+def _count_in_body(body, counts) -> None:
+    for s in body:
+        if isinstance(s, Call):
+            for a in s.args:
+                _count_in_value(a.value, counts)
+        elif isinstance(s, AssignStmt):
+            _count_in_value(s.value, counts)
+        elif isinstance(s, IfStmt):
+            _count_in_value(s.cond, counts)
+            _count_in_body(s.then, counts)
+            if s.else_:
+                _count_in_body(s.else_, counts)
+        elif isinstance(s, EachStmt):
+            _count_in_value(s.iterable, counts)
+            _count_in_body(s.body, counts)
+        elif isinstance(s, RepeatStmt):
+            _count_in_value(s.count, counts)
+            _count_in_body(s.body, counts)
+        elif isinstance(s, WhenStmt):
+            for a in s.args:
+                _count_in_value(a, counts)
+            _count_in_body(s.body, counts)
+
+
+def _count_in_value(value, counts) -> None:
+    if isinstance(value, Name):
+        if value.parts:
+            counts[value.parts[0]] = counts.get(value.parts[0], 0) + 1
+    elif isinstance(value, FuncCall):
+        for a in value.args:
+            _count_in_value(a, counts)
+    elif isinstance(value, BinOp):
+        _count_in_value(value.left, counts)
+        _count_in_value(value.right, counts)
+    elif isinstance(value, Ternary):
+        _count_in_value(value.cond, counts)
+        _count_in_value(value.then, counts)
+        _count_in_value(value.else_, counts)
+    elif isinstance(value, ListLit):
+        for x in value.items:
+            _count_in_value(x, counts)
+    elif isinstance(value, DictLit):
+        for _, v in value.entries:
+            _count_in_value(v, counts)
+
+
+def _replace_and_drop(body, inlines):
+    """Walk body: replace Name refs to keys of `inlines` with their values, and
+    drop the corresponding AssignStmt definitions.
+    """
+    new = []
+    for stmt in body:
+        if isinstance(stmt, AssignStmt) and stmt.target in inlines:
+            continue
+        if isinstance(stmt, Call):
+            stmt.args = [Arg(a.name, _replace_value(a.value, inlines)) for a in stmt.args]
+        elif isinstance(stmt, AssignStmt):
+            stmt.value = _replace_value(stmt.value, inlines)
+        elif isinstance(stmt, IfStmt):
+            stmt.cond = _replace_value(stmt.cond, inlines)
+            stmt.then = _replace_and_drop(stmt.then, inlines)
+            if stmt.else_:
+                stmt.else_ = _replace_and_drop(stmt.else_, inlines)
+        elif isinstance(stmt, EachStmt):
+            stmt.iterable = _replace_value(stmt.iterable, inlines)
+            stmt.body = _replace_and_drop(stmt.body, inlines)
+        elif isinstance(stmt, RepeatStmt):
+            stmt.count = _replace_value(stmt.count, inlines)
+            stmt.body = _replace_and_drop(stmt.body, inlines)
+        elif isinstance(stmt, WhenStmt):
+            stmt.args = [_replace_value(a, inlines) for a in stmt.args]
+            stmt.body = _replace_and_drop(stmt.body, inlines)
+        new.append(stmt)
+    return new
+
+
+def _replace_value(value, inlines, _expanding=None):
+    """Substitute inlinable names with their values, recursively, with cycle
+    protection so we never loop on `t = t`-style self-references."""
+    _expanding = _expanding or frozenset()
+    if isinstance(value, Name) and len(value.parts) == 1:
+        n = value.parts[0]
+        if n in inlines and n not in _expanding:
+            return _replace_value(inlines[n], inlines, _expanding | {n})
+        return value
+    if isinstance(value, FuncCall):
+        return FuncCall(value.name, [_replace_value(a, inlines, _expanding) for a in value.args])
+    if isinstance(value, BinOp):
+        return BinOp(value.op, _replace_value(value.left, inlines, _expanding),
+                     _replace_value(value.right, inlines, _expanding))
+    if isinstance(value, Ternary):
+        return Ternary(_replace_value(value.cond, inlines, _expanding),
+                       _replace_value(value.then, inlines, _expanding),
+                       _replace_value(value.else_, inlines, _expanding))
+    if isinstance(value, ListLit):
+        return ListLit([_replace_value(x, inlines, _expanding) for x in value.items])
+    if isinstance(value, DictLit):
+        return DictLit([(k, _replace_value(v, inlines, _expanding)) for k, v in value.entries])
+    return value

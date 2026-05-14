@@ -278,6 +278,15 @@ function parseLine(line, lineNo) {
     return { type: 'when', event: trimmed.slice(5).trim(), lineNo };
   }
 
+  // Assignment: name = expr  (but NOT == or named-arg `name=value`)
+  // Anchor at line start, require a name then '=' that is NOT followed by '='.
+  const assignM = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?!=)(.+)$/);
+  // Disambiguate from `verb name=value`: only an assignment if the LHS is the
+  // *only* identifier before the '=', i.e. no whitespace-separated verb.
+  if (assignM) {
+    return { type: 'assign', target: assignM[1], expr: assignM[2].trim(), lineNo };
+  }
+
   // call
   let body = trimmed; let out = null;
   // Find -> outside of quotes
@@ -303,10 +312,17 @@ function parseLine(line, lineNo) {
 // ---------------- rendering ----------------
 function renderCall(n) {
   const cat = CAT[n.verb] || 'ctrl';
-  const args = n.args.map(a =>
-    `<span class="arg"><b>${esc(a.name)}=</b>${esc(a.value)}</span>`).join('');
+  const args = n.args.map(a => {
+    // `?` is our synthetic name for positional values — render without label.
+    if (a.name === '?') return `<span class="arg">${esc(a.value)}</span>`;
+    return `<span class="arg"><b>${esc(a.name)}=</b>${esc(a.value)}</span>`;
+  }).join('');
   const out = n.out ? `<span class="out">&rarr; ${esc(n.out)}</span>` : '';
   return `<div><span class="block cat-${cat}" data-line="${n.lineNo}"><span class="verb">${esc(n.verb)}</span>${args}${out}</span></div>`;
+}
+
+function renderAssign(n) {
+  return `<div><span class="block cat-ctrl"><span class="out">${esc(n.target)}</span> <span class="verb">=</span> <span class="cond">${esc(n.expr)}</span></span></div>`;
 }
 
 function renderControlHead(cat, keyword, label) {
@@ -362,6 +378,12 @@ function build(lines) {
       top.kids.push(ph);
       top.pending = ph;
       stack.push({ kids, indent, pending: null });
+      continue;
+    }
+
+    if (node.type === 'assign') {
+      top.kids.push(renderAssign(node));
+      top.pending = null;
       continue;
     }
 

@@ -21,19 +21,25 @@ def _semantically_same(a: str, b: str) -> bool:
 
 class TestMathToAssignment(unittest.TestCase):
 
-    def test_add_rewrites(self):
-        out = shrink_source("add a=3 b=4 -> s\nprint value=s")
-        self.assertIn("s = 3 + 4", out)
+    def test_add_used_twice_becomes_assignment(self):
+        # Used twice → can't inline; stays as assignment.
+        out = shrink_source("add a=3 b=4 -> s\nprint s\nprint s")
+        self.assertIn("s = (3 + 4)", out)
         self.assertNotIn("add a=", out)
 
-    def test_sub_rewrites(self):
-        out = shrink_source("sub a=10 b=3 -> d\nprint d")
-        self.assertIn("d = 10 - 3", out)
+    def test_used_once_inlines_through(self):
+        # Used once → math-rewrite + inline combine.
+        out = shrink_source("add a=3 b=4 -> s\nprint value=s")
+        self.assertNotIn("add a=", out)
+        self.assertIn("3 + 4", out)
+        self.assertIn("print", out)
 
-    def test_mul_div_rewrites(self):
+    def test_chain_used_once(self):
         out = shrink_source("mul a=4 b=5 -> p\ndiv a=p b=2 -> half\nprint half")
-        self.assertIn("p = 4 * 5", out)
-        self.assertIn("half = p / 2", out)
+        # half = p/2 = (4*5)/2 → all inlined into the print.
+        self.assertNotIn("mul ", out)
+        self.assertNotIn("div ", out)
+        self.assertIn("print", out)
 
     def test_preserves_semantics(self):
         before = "add a=2 b=3 -> s\nprint value=s"
@@ -43,15 +49,17 @@ class TestMathToAssignment(unittest.TestCase):
 
 class TestAggregatorToAssignment(unittest.TestCase):
 
-    def test_count_rewrites(self):
-        out = shrink_source("count of=[1, 2, 3] -> n\nprint n")
+    def test_count_used_twice(self):
+        out = shrink_source("count of=[1, 2, 3] -> n\nprint n\nprint n")
         self.assertIn("n = count([1, 2, 3])", out)
 
-    def test_sum_rewrites(self):
-        out = shrink_source("sum of=[1, 2, 3, 4] -> t\nprint t")
-        self.assertIn("t = sum([1, 2, 3, 4])", out)
+    def test_count_used_once_inlines(self):
+        out = shrink_source("count of=[1, 2, 3] -> n\nprint n")
+        self.assertNotIn("count of=", out)
+        self.assertIn("count([1, 2, 3])", out)
+        self.assertNotIn("\nn = ", out)  # no assignment line
 
-    def test_semantic_equivalence(self):
+    def test_sum_inline_semantic_equivalence(self):
         before = "sum of=[1,2,3,4,5] -> t\nprint t"
         self.assertTrue(_semantically_same(before, shrink_source(before)))
 
@@ -59,12 +67,14 @@ class TestAggregatorToAssignment(unittest.TestCase):
 class TestMirrorIfToTernary(unittest.TestCase):
 
     def test_mirror_if_collapses(self):
+        # msg used twice so it stays as an assignment after mirror-if rewrite.
         before = (
             "x = 5\n"
             "if x > 0\n"
             "  msg = \"big\"\n"
             "else\n"
             "  msg = \"small\"\n"
+            "print msg\n"
             "print msg"
         )
         out = shrink_source(before)
@@ -73,6 +83,21 @@ class TestMirrorIfToTernary(unittest.TestCase):
         self.assertIn(":", out)
         # Should have eliminated the if/else.
         self.assertNotIn("\nif ", out)
+
+    def test_mirror_if_collapses_and_inlines(self):
+        # msg used once → inlined further.
+        before = (
+            "if x > 0\n"
+            "  msg = \"big\"\n"
+            "else\n"
+            "  msg = \"small\"\n"
+            "print msg"
+        )
+        out = shrink_source(before)
+        self.assertIn("?", out)
+        self.assertNotIn("\nif ", out)
+        self.assertNotIn("msg =", out)
+        self.assertIn("print", out)
 
     def test_unbalanced_if_not_rewritten(self):
         # then branch has 2 stmts → cannot collapse to ternary.

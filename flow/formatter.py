@@ -282,11 +282,11 @@ def _fmt_value(v) -> str:
         args = ", ".join(_fmt_value(a) for a in v.args)
         return f"{v.name}({args})"
     if isinstance(v, BinOp):
-        # We do not preserve original parens, but emit defensively bracketed for clarity
-        # if the operator is logical.
+        # Always parenthesize: a top-level BinOp in arg-value position would
+        # otherwise be misparsed (the parser consumes only one primary value).
         l = _fmt_value(v.left)
         r = _fmt_value(v.right)
-        return f"{l} {v.op} {r}"
+        return f"({l} {v.op} {r})"
     if isinstance(v, ListLit):
         return "[" + ", ".join(_fmt_value(x) for x in v.items) + "]"
     if isinstance(v, DictLit):
