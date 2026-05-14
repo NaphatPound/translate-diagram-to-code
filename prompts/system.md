@@ -74,6 +74,13 @@ follow these rules exactly. The parser is strict; deviations will fail.
         p f"hi {name}, age {age}"      # ≡ format template=... data=... + print
     Escape a literal `{` by writing `\{`. Compiles natively to each target
     (Python f-string, JS template literal, Go `Sprintf`, Rust `format!`, Bash).
+20. **Method calls** `name.method(args)` — for any variable in scope, you can
+    call methods directly. The receiver must be a single dotted name; method
+    calls on literals (e.g. `"abc".upper()`) require assigning to a variable
+    first. Compiles to native method syntax in every target.
+        s = "hello, world"
+        p s.upper()                     # → "HELLO, WORLD"
+        parts = s.split(",")            # → ["hello", " world"]
 
 ## Verb categories (you may only use these verbs)
 

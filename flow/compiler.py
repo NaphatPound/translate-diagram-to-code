@@ -53,12 +53,42 @@ def compile_to(program: Program, lang: str) -> str:
     src = c.source()
     if lang == "python":
         src = _hoist_python_imports(src)
+    elif lang == "js":
+        src = _hoist_js_requires(src)
     return src
 
 
 _PY_INLINE_IMPORT_RE = re.compile(
     r"^(import\s+[A-Za-z_][\w.]*(?:\s+as\s+[A-Za-z_]\w*)?)\s*;\s*(.*)$"
 )
+
+
+_JS_REQUIRE_RE = re.compile(r"require\((['\"])([A-Za-z_][\w-]*)\1\)")
+
+
+def _hoist_js_requires(src: str) -> str:
+    """Replace every `require('X')` with a hoisted `_X` const so the module
+    is required only once at the top of the file."""
+    found: list = []
+    seen: set = set()
+
+    def _safe(name: str) -> str:
+        return "_" + name.replace("-", "_")
+
+    def _sub(match):
+        mod = match.group(2)
+        if mod not in seen:
+            seen.add(mod)
+            found.append(mod)
+        return _safe(mod)
+
+    new_src = _JS_REQUIRE_RE.sub(_sub, src)
+    if not found:
+        return src
+    header = "\n".join(
+        f"const {_safe(m)} = require('{m}');" for m in found
+    ) + "\n\n"
+    return header + new_src
 
 
 def _hoist_python_imports(src: str) -> str:
@@ -561,6 +591,15 @@ class _Compiler:
             "float": {"python": "float","js": "parseFloat",       "go": "float64", "rust": "f64::from", "bash": ""},
         }
         args = ", ".join(self._render_value(a) for a in f.args)
+        # Method call: `receiver.method(...)`. Render the receiver via
+        # _render_name so a bareword receiver still becomes a variable when
+        # in scope, and the call uses the language's native dot syntax.
+        if "." in f.name:
+            parts = f.name.split(".")
+            receiver_name = Name(parts[:-1])
+            method = parts[-1]
+            receiver_src = self._render_name(receiver_name)
+            return f"{receiver_src}.{method}({args})"
         if f.name in BUILTINS and BUILTINS[f.name].get(self.lang, "<no-op>") != "<no-op>":
             return f"{BUILTINS[f.name][self.lang]}({args})"
         return f"{f.name}({args})"

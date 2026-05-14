@@ -626,7 +626,10 @@ class _Parser:
 
     def _parse_funccall(self, toks: List[Token], i: int, line_no: int) -> Tuple[FuncCall, int]:
         name = toks[i].value
-        if not _is_ident(name):
+        # Accept either a plain identifier (e.g., `count`) or a dotted method
+        # call (e.g., `row.upper`, `data.items.first`). Each segment must be
+        # a valid identifier.
+        if not all(_is_ident(part) for part in name.split(".")):
             raise ParseError(f"function name must be an identifier (got {name!r})",
                              toks[i].line, toks[i].col)
         i += 2  # skip name + '('
@@ -774,7 +777,7 @@ def _split_word_path(w: str) -> List[str]:
     return w.split(".")
 
 
-_FSTRING_PLACEHOLDER = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+_FSTRING_PLACEHOLDER = re.compile(r"\{([A-Za-z_][A-Za-z0-9_.]*)\}")
 
 
 def _parse_fstring(content: str, line: int, col: int) -> "FString":
