@@ -184,38 +184,17 @@ def generate(
     if not polish:
         return code
 
-    # Polish pass: lint-driven rewrite, kept only if it still validates.
+    # Polish pass: deterministic shrink (no extra LLM call). Falls back to the
+    # validated-but-verbose original if anything goes wrong.
     try:
-        from .lint import lint_source
-    except Exception:
-        return code
-    warnings = lint_source(code)
-    if not warnings:
-        return code
-
-    if verbose:
-        print(f"--- polish pass: {len(warnings)} suggestions ---", file=sys.stderr)
-    suggestion_block = "\n".join(
-        f"  line {w.line}: replace `{w.message}` → `{w.suggestion}`"
-        for w in warnings
-    )
-    messages.append({"role": "assistant", "content": code})
-    messages.append({
-        "role": "user",
-        "content": (
-            "The code is valid but verbose. Apply these shorter forms:\n"
-            f"{suggestion_block}\n\n"
-            "Return the rewritten Flow program. Output Flow source only."
-        ),
-    })
-    try:
-        reply2 = _chat(messages, cfg)
-        polished = _extract_code(reply2)
-        ast2 = parse(polished)
-        compile_to(ast2, "python")
+        from .shrink import shrink_source
+        polished = shrink_source(code)
+        # Re-validate just to be paranoid.
+        compile_to(parse(polished), "python")
+        if verbose and polished != code:
+            print("--- polished by flow.shrink ---", file=sys.stderr)
         return polished
-    except (ParseError, CompileError, LLMError):
-        # Polish failed — return the validated-but-verbose version.
+    except (ParseError, CompileError, Exception):
         return code
 
 

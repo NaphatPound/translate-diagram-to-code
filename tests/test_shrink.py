@@ -1,0 +1,110 @@
+"""Tests for the deterministic shrink rewriter."""
+import sys
+import os
+import unittest
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from flow import parse, compile_to
+from flow.shrink import shrink_source, shrink
+
+
+def _semantically_same(a: str, b: str) -> bool:
+    """Compile both to Python and check they produce identical stdout."""
+    import subprocess
+    pa = compile_to(parse(a), "python")
+    pb = compile_to(parse(b), "python")
+    out_a = subprocess.run([sys.executable, "-c", pa], capture_output=True, text=True, timeout=4).stdout
+    out_b = subprocess.run([sys.executable, "-c", pb], capture_output=True, text=True, timeout=4).stdout
+    return out_a == out_b
+
+
+class TestMathToAssignment(unittest.TestCase):
+
+    def test_add_rewrites(self):
+        out = shrink_source("add a=3 b=4 -> s\nprint value=s")
+        self.assertIn("s = 3 + 4", out)
+        self.assertNotIn("add a=", out)
+
+    def test_sub_rewrites(self):
+        out = shrink_source("sub a=10 b=3 -> d\nprint d")
+        self.assertIn("d = 10 - 3", out)
+
+    def test_mul_div_rewrites(self):
+        out = shrink_source("mul a=4 b=5 -> p\ndiv a=p b=2 -> half\nprint half")
+        self.assertIn("p = 4 * 5", out)
+        self.assertIn("half = p / 2", out)
+
+    def test_preserves_semantics(self):
+        before = "add a=2 b=3 -> s\nprint value=s"
+        after = shrink_source(before)
+        self.assertTrue(_semantically_same(before, after))
+
+
+class TestAggregatorToAssignment(unittest.TestCase):
+
+    def test_count_rewrites(self):
+        out = shrink_source("count of=[1, 2, 3] -> n\nprint n")
+        self.assertIn("n = count([1, 2, 3])", out)
+
+    def test_sum_rewrites(self):
+        out = shrink_source("sum of=[1, 2, 3, 4] -> t\nprint t")
+        self.assertIn("t = sum([1, 2, 3, 4])", out)
+
+    def test_semantic_equivalence(self):
+        before = "sum of=[1,2,3,4,5] -> t\nprint t"
+        self.assertTrue(_semantically_same(before, shrink_source(before)))
+
+
+class TestMirrorIfToTernary(unittest.TestCase):
+
+    def test_mirror_if_collapses(self):
+        before = (
+            "x = 5\n"
+            "if x > 0\n"
+            "  msg = \"big\"\n"
+            "else\n"
+            "  msg = \"small\"\n"
+            "print msg"
+        )
+        out = shrink_source(before)
+        self.assertIn("msg = ", out)
+        self.assertIn("?", out)
+        self.assertIn(":", out)
+        # Should have eliminated the if/else.
+        self.assertNotIn("\nif ", out)
+
+    def test_unbalanced_if_not_rewritten(self):
+        # then branch has 2 stmts → cannot collapse to ternary.
+        before = (
+            "if x > 0\n"
+            "  msg = \"big\"\n"
+            "  flag = true\n"
+            "else\n"
+            "  msg = \"small\""
+        )
+        out = shrink_source(before)
+        # Should still contain `if`.
+        self.assertIn("if ", out)
+
+    def test_different_targets_not_rewritten(self):
+        before = (
+            "if x > 0\n"
+            "  a = 1\n"
+            "else\n"
+            "  b = 2"
+        )
+        out = shrink_source(before)
+        self.assertIn("if ", out)
+
+
+class TestNoOpOnCompactInput(unittest.TestCase):
+
+    def test_already_compact_unchanged_semantically(self):
+        compact = 'items = [1, 2, 3]\nn = count(items)\np n'
+        out = shrink_source(compact)
+        self.assertTrue(_semantically_same(compact, out))
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

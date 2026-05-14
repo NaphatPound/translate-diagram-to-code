@@ -22,7 +22,8 @@ class TestApplyEdits(unittest.TestCase):
             'read file="old.csv" -> rows',
             [{"line": 1, "args": {"file": "new.csv"}}],
         )
-        self.assertIn('file="new.csv"', out)
+        # Formatter collapses to positional form: `read "new.csv"`.
+        self.assertIn('read "new.csv"', out)
         self.assertIn("-> rows", out)
 
     def test_change_out_name(self):
@@ -44,7 +45,7 @@ class TestApplyEdits(unittest.TestCase):
             'print value=oldvar',
             [{"line": 1, "args": {"value": "$newvar"}}],
         )
-        self.assertIn("value=newvar", out)
+        self.assertIn("print newvar", out)
         self.assertNotIn('"newvar"', out)  # not a string literal
 
     def test_number_coercion(self):
@@ -52,7 +53,7 @@ class TestApplyEdits(unittest.TestCase):
             'wait seconds=5',
             [{"line": 1, "args": {"seconds": 10}}],
         )
-        self.assertIn("seconds=10", out)
+        self.assertIn("wait 10", out)
 
     def test_edit_inside_control_block(self):
         src = (
@@ -61,14 +62,14 @@ class TestApplyEdits(unittest.TestCase):
             "  print value=rows"
         )
         out = _round_trip(src, [{"line": 2, "args": {"file": "b.csv"}, "out": "rows"}])
-        self.assertIn('file="b.csv"', out)
+        self.assertIn('read "b.csv"', out)
 
     def test_no_op_when_no_matching_line(self):
         out = _round_trip(
             'print value=hi',
             [{"line": 99, "args": {"value": "bye"}}],
         )
-        self.assertIn("value=hi", out)
+        self.assertIn("print hi", out)
 
 
 if __name__ == "__main__":

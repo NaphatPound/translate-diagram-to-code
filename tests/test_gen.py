@@ -61,23 +61,17 @@ class TestLoop(unittest.TestCase):
         self.assertEqual(out, 'print value="ok"')
 
     @patch("flow.gen._chat")
-    def test_polish_rewrites_verbose_code(self, mock_chat):
-        # First reply is valid but verbose; polish pass returns a shorter form.
-        mock_chat.side_effect = [
-            'add a=3 b=4 -> s\nprint value=s',
-            's = 3 + 4\nprint s',
-        ]
+    def test_polish_shrinks_verbose_code(self, mock_chat):
+        # Verbose first reply; deterministic shrink rewrites — no 2nd LLM call.
+        mock_chat.return_value = 'add a=3 b=4 -> s\nprint value=s'
         out = generate("3 + 4", retries=1, polish=True)
         self.assertIn("s = 3 + 4", out)
-        self.assertEqual(mock_chat.call_count, 2)
+        self.assertEqual(mock_chat.call_count, 1)
 
     @patch("flow.gen._chat")
-    def test_polish_keeps_original_if_rewrite_invalid(self, mock_chat):
-        mock_chat.side_effect = [
-            'add a=3 b=4 -> s\nprint value=s',
-            'this is not valid flow',   # polish reply fails — keep original
-        ]
-        out = generate("3 + 4", retries=1, polish=True)
+    def test_no_polish_keeps_verbose(self, mock_chat):
+        mock_chat.return_value = 'add a=3 b=4 -> s\nprint value=s'
+        out = generate("3 + 4", retries=1, polish=False)
         self.assertIn("add a=3", out)
 
 

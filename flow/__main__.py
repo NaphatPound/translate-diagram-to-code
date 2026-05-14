@@ -95,6 +95,20 @@ def cmd_lint(args):
     cli_main(args)
 
 
+def cmd_shrink(args):
+    from .shrink import shrink_source
+    src = _read(args.file)
+    try:
+        out = shrink_source(src)
+    except ParseError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(2)
+    if args.write:
+        Path(args.file).write_text(out, encoding="utf-8")
+    else:
+        sys.stdout.write(out)
+
+
 def cmd_render(args):
     """Emit a standalone HTML file that renders this program's blocks.
 
@@ -184,6 +198,12 @@ def main():
     pl.add_argument("file")
     pl.add_argument("--fail", action="store_true", help="exit 1 if any warnings")
     pl.set_defaults(func=cmd_lint)
+
+    psh = sub.add_parser("shrink", help="rewrite Flow source to the shortest equivalent form")
+    psh.add_argument("file")
+    psh.add_argument("-w", "--write", action="store_true",
+                     help="overwrite the file in place")
+    psh.set_defaults(func=cmd_shrink)
 
     args = p.parse_args()
     args.func(args)

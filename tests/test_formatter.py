@@ -10,10 +10,11 @@ from flow.formatter import format_source
 
 
 def _structural(src):
-    """Parse → AST dict (strip line numbers) for structural comparison."""
+    """Parse → AST dict (strip line numbers, normalize sugar) for comparison."""
     ast = parse(src)
     d = ast_to_dict(ast)
     _strip_lines(d)
+    _normalize_pos_pipe(d)
     return d
 
 
@@ -25,6 +26,24 @@ def _strip_lines(o):
     elif isinstance(o, list):
         for v in o:
             _strip_lines(v)
+
+
+def _normalize_pos_pipe(o):
+    """Resolve <pos>/<pipe> synthetic arg names to the verb's primary_arg."""
+    from flow.verbs import VERBS
+    if isinstance(o, dict):
+        if o.get("kind") == "call":
+            verb = o.get("verb")
+            spec = VERBS.get(verb)
+            primary = spec.primary_arg if spec else ""
+            for a in o.get("args", []):
+                if isinstance(a, dict) and a.get("name") in ("<pos>", "<pipe>") and primary:
+                    a["name"] = primary
+        for v in o.values():
+            _normalize_pos_pipe(v)
+    elif isinstance(o, list):
+        for v in o:
+            _normalize_pos_pipe(v)
 
 
 class TestRoundTrip(unittest.TestCase):
