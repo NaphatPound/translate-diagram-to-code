@@ -21,7 +21,7 @@ from typing import List, Set
 from .parser import (
     Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhenStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, Arg,
-    ListLit, DictLit, Ternary, Range, FString,
+    ListLit, DictLit, Ternary, Range, FString, MethodCall,
 )
 
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -529,6 +529,13 @@ class _Compiler:
             raise CompileError(f"ternary not supported for lang {self.lang!r}")
         if isinstance(v, FString):
             return self._render_fstring(v)
+        if isinstance(v, MethodCall):
+            rec = self._render_value(v.receiver)
+            if v.args is None:
+                # Attribute access — `rec.member`.
+                return f"{rec}.{v.method}"
+            args = ", ".join(self._render_value(a) for a in v.args)
+            return f"{rec}.{v.method}({args})"
         if isinstance(v, Range):
             s = self._render_value(v.start)
             e = self._render_value(v.end)
@@ -591,15 +598,6 @@ class _Compiler:
             "float": {"python": "float","js": "parseFloat",       "go": "float64", "rust": "f64::from", "bash": ""},
         }
         args = ", ".join(self._render_value(a) for a in f.args)
-        # Method call: `receiver.method(...)`. Render the receiver via
-        # _render_name so a bareword receiver still becomes a variable when
-        # in scope, and the call uses the language's native dot syntax.
-        if "." in f.name:
-            parts = f.name.split(".")
-            receiver_name = Name(parts[:-1])
-            method = parts[-1]
-            receiver_src = self._render_name(receiver_name)
-            return f"{receiver_src}.{method}({args})"
         if f.name in BUILTINS and BUILTINS[f.name].get(self.lang, "<no-op>") != "<no-op>":
             return f"{BUILTINS[f.name][self.lang]}({args})"
         return f"{f.name}({args})"

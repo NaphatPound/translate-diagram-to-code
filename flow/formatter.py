@@ -19,7 +19,7 @@ from typing import List
 from .parser import (
     Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhenStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, Arg,
-    ListLit, DictLit, Ternary, Range, FString,
+    ListLit, DictLit, Ternary, Range, FString, MethodCall,
 )
 
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -214,6 +214,11 @@ def _count_in_value(value, counts):
         for kind, payload in value.parts:
             if kind == "var":
                 counts[payload] = counts.get(payload, 0) + 1
+    elif isinstance(value, MethodCall):
+        _count_in_value(value.receiver, counts)
+        if value.args is not None:
+            for a in value.args:
+                _count_in_value(a, counts)
 
 
 # ---------- calls ----------
@@ -317,4 +322,10 @@ def _fmt_value(v) -> str:
             else:
                 body += "{" + payload + "}"
         return f'f"{body}"'
+    if isinstance(v, MethodCall):
+        rec = _fmt_value(v.receiver)
+        if v.args is None:
+            return f"{rec}.{v.method}"
+        args = ", ".join(_fmt_value(a) for a in v.args)
+        return f"{rec}.{v.method}({args})"
     raise ValueError(f"unknown value type: {type(v).__name__}")

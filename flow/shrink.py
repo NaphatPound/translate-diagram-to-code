@@ -33,7 +33,7 @@ from . import parse
 from .parser import (
     Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhenStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, ListLit, DictLit,
-    Ternary, Range, FString, Arg,
+    Ternary, Range, FString, MethodCall, Arg,
 )
 from .formatter import format_source
 
@@ -192,6 +192,10 @@ def _walk_all(body):
 def _is_safe_to_inline(value) -> bool:
     if isinstance(value, (StringLit, NumberLit, BoolLit, Name, FString)):
         return True
+    if isinstance(value, MethodCall):
+        # Method calls may have side effects (e.g., `.read()`, `.pop()`).
+        # Conservatively, don't inline.
+        return False
     if isinstance(value, BinOp):
         return _is_safe_to_inline(value.left) and _is_safe_to_inline(value.right)
     if isinstance(value, Ternary):
@@ -262,6 +266,11 @@ def _count_in_value(value, counts) -> None:
         for kind, payload in value.parts:
             if kind == "var":
                 counts[payload] = counts.get(payload, 0) + 1
+    elif isinstance(value, MethodCall):
+        _count_in_value(value.receiver, counts)
+        if value.args is not None:
+            for a in value.args:
+                _count_in_value(a, counts)
 
 
 def _replace_and_drop(body, inlines):
@@ -334,4 +343,12 @@ def _replace_value(value, inlines, _expanding=None):
             else:
                 new_parts.append((kind, payload))
         return FString(parts=new_parts)
+    if isinstance(value, MethodCall):
+        new_args = (None if value.args is None
+                    else [_replace_value(a, inlines, _expanding) for a in value.args])
+        return MethodCall(
+            receiver=_replace_value(value.receiver, inlines, _expanding),
+            method=value.method,
+            args=new_args,
+        )
     return value

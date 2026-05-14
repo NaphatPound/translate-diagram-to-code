@@ -7,7 +7,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from flow import parse, compile_to
-from flow.parser import FuncCall
+from flow.parser import FuncCall, MethodCall
 
 
 def _run_py(src):
@@ -20,11 +20,11 @@ def _run_py(src):
 
 class TestMethodCall(unittest.TestCase):
 
-    def test_parses_dotted_funccall(self):
+    def test_parses_method_call(self):
         ast = parse('p name.upper()')
         v = ast.body[0].args[0].value
-        self.assertIsInstance(v, FuncCall)
-        self.assertEqual(v.name, "name.upper")
+        self.assertIsInstance(v, MethodCall)
+        self.assertEqual(v.method, "upper")
 
     def test_python_method_call(self):
         py = compile_to(parse('name = "hello"\np name.upper()'), "python")

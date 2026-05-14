@@ -74,13 +74,18 @@ follow these rules exactly. The parser is strict; deviations will fail.
         p f"hi {name}, age {age}"      # ≡ format template=... data=... + print
     Escape a literal `{` by writing `\{`. Compiles natively to each target
     (Python f-string, JS template literal, Go `Sprintf`, Rust `format!`, Bash).
-20. **Method calls** `name.method(args)` — for any variable in scope, you can
-    call methods directly. The receiver must be a single dotted name; method
-    calls on literals (e.g. `"abc".upper()`) require assigning to a variable
-    first. Compiles to native method syntax in every target.
-        s = "hello, world"
-        p s.upper()                     # → "HELLO, WORLD"
-        parts = s.split(",")            # → ["hello", " world"]
+20. **Method calls + chains** `name.method(args).method2()` — any value can be
+    followed by `.name` (attribute) or `.name(args)` (method). Chains work:
+        s = "  hello, world  "
+        p s.strip().upper().split(",")
+    Method calls on literals like `"abc".upper()` still need a variable first
+    (no DOT token after STRING yet).
+21. **Postfix-if** `X if cond` — a single-statement conditional on one line.
+    Equivalent to `if cond` + indented body, without the indent overhead:
+        p "big" if x > 0
+        r "log.txt" -> log if verbose
+    Works for any statement (call, pipeline, etc.) — wraps the WHOLE
+    statement in an `if` with no else branch.
 
 ## Verb categories (you may only use these verbs)
 

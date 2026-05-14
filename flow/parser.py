@@ -27,7 +27,7 @@ from typing import List, Optional, Union, Tuple, Any
 # AST
 # ============================================================
 
-Value = Union["StringLit", "NumberLit", "BoolLit", "Name", "FuncCall", "BinOp", "ListLit", "DictLit", "Ternary", "Range", "FString"]
+Value = Union["StringLit", "NumberLit", "BoolLit", "Name", "FuncCall", "BinOp", "ListLit", "DictLit", "Ternary", "Range", "FString", "MethodCall"]
 Stmt = Union["Call", "AssignStmt", "IfStmt", "EachStmt", "RepeatStmt", "WhenStmt"]
 
 
@@ -110,6 +110,16 @@ class FString:
     """
     parts: List[Tuple[str, str]]
     kind: str = "fstring"
+
+
+@dataclass
+class MethodCall:
+    """`receiver.method(args)` — produced by the postfix DOT chain in the
+    parser. `args` is None for plain attribute access (`receiver.member`)."""
+    receiver: Value
+    method: str
+    args: Optional[List[Value]]
+    kind: str = "methodcall"
 
 
 @dataclass
@@ -231,9 +241,11 @@ TOKEN_SPEC = [
     ("RBRACE", r"\}"),
     ("COLON", r":"),
     ("COMMA", r","),
-    # Bareword: starts with letter/underscore. May include . and -
-    # (e.g. data.csv, my-file.txt). URLs and paths with / or : must be quoted.
-    ("WORD", r"[A-Za-z_][A-Za-z0-9_.\-]*"),
+    ("DOT", r"\."),
+    # Bareword: starts with letter/underscore. May include `-` for file/url
+    # fragments. Dots are tokenised separately (DOT) so `data.csv`, `a.b.c`,
+    # and `s.upper()` all flow through the postfix-DOT parser rule.
+    ("WORD", r"[A-Za-z_][A-Za-z0-9_\-]*"),
     ("WS", r"[ \t]+"),
 ]
 
@@ -416,15 +428,27 @@ class _Parser:
     # ---------- pipeline / call ----------
 
     def _parse_pipeline(self, line: _Line):
-        """Parse a (possibly piped) call line. Returns Call or List[Call]."""
+        """Parse a (possibly piped) call line. Returns Call, List[Call], or
+        IfStmt when a trailing `if <cond>` wraps the line."""
         toks = line.tokens
         calls: List[Call] = []
         i = 0
         pipe_in: Optional[str] = None
+        postfix_if_cond: Optional[Value] = None
         while i < len(toks):
             call, i = self._parse_call_segment(toks, i, line.line_no, pipe_in)
             calls.append(call)
             if i >= len(toks):
+                break
+            # Postfix-if: ` ... if <cond>` at the tail wraps everything in IfStmt.
+            if toks[i].kind == "KW_IF":
+                i += 1
+                postfix_if_cond, i = self._parse_expr(toks, i, line.line_no)
+                if i < len(toks):
+                    raise ParseError(
+                        f"unexpected token after postfix-if: {toks[i].value!r}",
+                        toks[i].line, toks[i].col,
+                    )
                 break
             if toks[i].kind != "PIPE":
                 raise ParseError(
@@ -437,6 +461,9 @@ class _Parser:
                 call.out = self._fresh_pipe_name()
             pipe_in = call.out
         self.idx += 1
+        if postfix_if_cond is not None:
+            return IfStmt(cond=postfix_if_cond, then=list(calls),
+                          else_=None, line=line.line_no)
         return calls if len(calls) > 1 else calls[0]
 
     def _fresh_pipe_name(self) -> str:
@@ -470,8 +497,8 @@ class _Parser:
             value, i = self._parse_value(toks, i, line_no)
             args.append(Arg("<pos>", value))
 
-        # Named args + optional ->name; stop at PIPE.
-        while i < len(toks) and toks[i].kind != "PIPE":
+        # Named args + optional ->name; stop at PIPE or postfix-if.
+        while i < len(toks) and toks[i].kind not in ("PIPE", "KW_IF"):
             t = toks[i]
             if t.kind == "ARROW":
                 if i + 1 >= len(toks):
@@ -484,7 +511,7 @@ class _Parser:
                     )
                 out = name_tok.value
                 i += 2
-                if i < len(toks) and toks[i].kind != "PIPE":
+                if i < len(toks) and toks[i].kind not in ("PIPE", "KW_IF"):
                     extra = toks[i]
                     raise ParseError(
                         f"unexpected token after output name: {extra.value!r}",
@@ -525,14 +552,58 @@ class _Parser:
 
     def _parse_value(self, toks: List[Token], i: int, line_no: int) -> Tuple[Value, int]:
         """Parse a single value starting at toks[i]. Returns (value, new_i).
-        Trailing `..end` is consumed to form a Range.
-        """
+        Handles trailing `..end` (range), and postfix `.name` / `.name(args)`
+        chains so `data.csv`, `s.upper()`, and `s.split(",")[.length]` parse
+        correctly."""
         v, i = self._parse_primary(toks, i, line_no)
         # Range literal: <primary>..<primary>
         if i < len(toks) and toks[i].kind == "DOTDOT":
             i += 1
             end, i = self._parse_primary(toks, i, line_no)
             v = Range(start=v, end=end)
+            return v, i
+        # Postfix `.name` / `.name(args)` chain.
+        while i < len(toks) and toks[i].kind == "DOT":
+            i += 1
+            if i >= len(toks) or toks[i].kind != "WORD" or not _is_ident(toks[i].value):
+                raise ParseError(
+                    "expected attribute or method name after '.'",
+                    toks[i].line if i < len(toks) else line_no,
+                    toks[i].col if i < len(toks) else 1,
+                )
+            member = toks[i].value
+            i += 1
+            if i < len(toks) and toks[i].kind == "LPAREN":
+                # method call — parse args
+                i += 1
+                m_args: List[Value] = []
+                if i < len(toks) and toks[i].kind == "RPAREN":
+                    i += 1
+                else:
+                    while True:
+                        arg_v, i = self._parse_value(toks, i, line_no)
+                        m_args.append(arg_v)
+                        if i >= len(toks):
+                            raise ParseError("expected ')' to close method call",
+                                             line_no, 1)
+                        if toks[i].kind == "COMMA":
+                            i += 1
+                            continue
+                        if toks[i].kind == "RPAREN":
+                            i += 1
+                            break
+                        raise ParseError(
+                            f"expected ',' or ')' in method call, got {toks[i].value!r}",
+                            toks[i].line, toks[i].col,
+                        )
+                v = MethodCall(receiver=v, method=member, args=m_args)
+            else:
+                # Attribute access — extend Name path when receiver is a Name,
+                # otherwise wrap in MethodCall(args=None).
+                if isinstance(v, Name):
+                    v = Name(parts=v.parts + [member])
+                else:
+                    v = MethodCall(receiver=v, method=member, args=None)
         return v, i
 
     def _parse_primary(self, toks: List[Token], i: int, line_no: int) -> Tuple[Value, int]:
@@ -626,10 +697,7 @@ class _Parser:
 
     def _parse_funccall(self, toks: List[Token], i: int, line_no: int) -> Tuple[FuncCall, int]:
         name = toks[i].value
-        # Accept either a plain identifier (e.g., `count`) or a dotted method
-        # call (e.g., `row.upper`, `data.items.first`). Each segment must be
-        # a valid identifier.
-        if not all(_is_ident(part) for part in name.split(".")):
+        if not _is_ident(name):
             raise ParseError(f"function name must be an identifier (got {name!r})",
                              toks[i].line, toks[i].col)
         i += 2  # skip name + '('
