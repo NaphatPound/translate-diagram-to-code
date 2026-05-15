@@ -183,6 +183,75 @@ class TestMirrorReturnToTernary(unittest.TestCase):
         self.assertIn("if ", out)
 
 
+class TestBoolTernary(unittest.TestCase):
+    """`cond ? true : false` → `cond`, `cond ? false : true` → `!cond`."""
+
+    def test_true_false_collapses(self):
+        # `x` used twice so it stays as a var (the comparison survives).
+        out = shrink_source("x = 5\np (x > 0 ? true : false)\np x")
+        self.assertNotIn("? true", out)
+        self.assertNotIn("?", out)
+        self.assertIn("x > 0", out)
+
+    def test_false_true_collapses_to_not(self):
+        out = shrink_source("x = 5\np (x > 0 ? false : true)")
+        self.assertNotIn("? false", out)
+        # After simplifier: `not (x > 0)` → `x <= 0` via INVERTED_CMP.
+        self.assertIn("<=", out)
+
+
+class TestMirrorCallToTernary(unittest.TestCase):
+    """`if cond / verb A / else / verb B` (single positional) → `verb (cond ? A : B)`."""
+
+    def test_mirror_print_collapses(self):
+        before = (
+            "x = 5\n"
+            "if x > 0\n"
+            "  p \"pos\"\n"
+            "else\n"
+            "  p \"neg\""
+        )
+        out = shrink_source(before)
+        # The if/else is gone, replaced by one print with a ternary.
+        self.assertNotIn("\nif ", out)
+        self.assertIn("?", out)
+        self.assertIn("print", out)
+
+    def test_mirror_call_preserves_semantics(self):
+        before = (
+            "x = 5\n"
+            "if x > 0\n"
+            "  p \"pos\"\n"
+            "else\n"
+            "  p \"neg\""
+        )
+        self.assertTrue(_semantically_same(before, shrink_source(before)))
+
+    def test_different_verbs_not_collapsed(self):
+        before = (
+            "x = 5\n"
+            "if x > 0\n"
+            "  p \"x\"\n"
+            "else\n"
+            "  trim \"y\""
+        )
+        out = shrink_source(before)
+        self.assertIn("if ", out)
+
+    def test_call_with_out_not_collapsed(self):
+        # `upper "a" -> x / upper "b" -> y` — different outs, not a mirror.
+        before = (
+            "x = 5\n"
+            "if x > 0\n"
+            "  upper \"a\" -> y\n"
+            "else\n"
+            "  upper \"b\" -> z\n"
+            "p y"
+        )
+        out = shrink_source(before)
+        self.assertIn("if ", out)
+
+
 class TestNegationSimplify(unittest.TestCase):
     """Value-level rewrites: `!(a CMP b)` flips, `!!x` drops, `!BOOL` folds."""
 

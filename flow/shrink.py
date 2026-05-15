@@ -87,9 +87,16 @@ def _simplify_value(v):
     if isinstance(v, BinOp):
         return BinOp(v.op, _simplify_value(v.left), _simplify_value(v.right))
     if isinstance(v, Ternary):
-        return Ternary(_simplify_value(v.cond),
-                       _simplify_value(v.then),
-                       _simplify_value(v.else_))
+        cond = _simplify_value(v.cond)
+        then = _simplify_value(v.then)
+        else_ = _simplify_value(v.else_)
+        # `cond ? true : false`  → `cond`
+        if isinstance(then, BoolLit) and isinstance(else_, BoolLit):
+            if then.value is True and else_.value is False:
+                return cond
+            if then.value is False and else_.value is True:
+                return _simplify_value(UnaryOp("not", cond))
+        return Ternary(cond, then, else_)
     if isinstance(v, FuncCall):
         return FuncCall(v.name, [_simplify_value(a) for a in v.args])
     if isinstance(v, ListLit):
@@ -261,6 +268,8 @@ def _try_mirror_if_to_ternary(stmt: IfStmt):
 
     - `if cond: X=a / else: X=b`            → `X = cond ? a : b`
     - `if cond: return a / else: return b`  → `return cond ? a : b`
+    - `if cond: verb a / else: verb b`      → `verb (cond ? a : b)`
+      (only when both calls have a single positional arg and no `-> out`)
     """
     if not stmt.else_:
         return None
@@ -277,6 +286,19 @@ def _try_mirror_if_to_ternary(stmt: IfStmt):
             and a.value is not None and b.value is not None):
         return ReturnStmt(
             value=Ternary(cond=stmt.cond, then=a.value, else_=b.value),
+            line=stmt.line,
+        )
+    if (isinstance(a, Call) and isinstance(b, Call)
+            and a.verb == b.verb
+            and a.out is None and b.out is None
+            and len(a.args) == 1 and len(b.args) == 1
+            and a.args[0].name == "<pos>" and b.args[0].name == "<pos>"):
+        return Call(
+            verb=a.verb,
+            args=[Arg("<pos>", Ternary(cond=stmt.cond,
+                                       then=a.args[0].value,
+                                       else_=b.args[0].value))],
+            out=None,
             line=stmt.line,
         )
     return None
