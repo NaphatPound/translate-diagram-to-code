@@ -183,6 +183,52 @@ class TestMirrorReturnToTernary(unittest.TestCase):
         self.assertIn("if ", out)
 
 
+class TestNegationSimplify(unittest.TestCase):
+    """Value-level rewrites: `!(a CMP b)` flips, `!!x` drops, `!BOOL` folds."""
+
+    def test_not_eq_becomes_neq(self):
+        out = shrink_source("x = 5\np !(x == 0)\np x")
+        self.assertIn("!=", out)
+        self.assertNotIn("!(", out)
+
+    def test_not_neq_becomes_eq(self):
+        out = shrink_source("x = 5\np !(x != 0)\np x")
+        self.assertIn("==", out)
+
+    def test_not_lt_becomes_gte(self):
+        out = shrink_source("x = 5\np !(x < 0)\np x")
+        self.assertIn(">=", out)
+
+    def test_not_gte_becomes_lt(self):
+        out = shrink_source("x = 5\np !(x >= 0)\np x")
+        self.assertIn("(x < 0)", out)
+
+    def test_double_negation_drops(self):
+        out = shrink_source("x = true\np !!x\np x")
+        self.assertNotIn("!!", out)
+        # `!!x` should reduce to plain `x` ref.
+        self.assertIn("print x", out)
+
+    def test_not_true_folds(self):
+        out = shrink_source("p !true")
+        self.assertIn("false", out)
+        self.assertNotIn("!true", out)
+
+    def test_not_false_folds(self):
+        out = shrink_source("p !false")
+        self.assertIn("true", out)
+
+    def test_simplify_inside_if_cond(self):
+        # `if !(x == 0)` → `if x != 0`
+        out = shrink_source("x = 5\nif !(x == 0)\n  p x\np x")
+        self.assertIn("if (x != 0)", out)
+        self.assertNotIn("!(", out)
+
+    def test_simplify_preserves_semantics(self):
+        before = "x = 5\np !(x == 0)\np !(x < 100)\np !!true"
+        self.assertTrue(_semantically_same(before, shrink_source(before)))
+
+
 class TestNoOpOnCompactInput(unittest.TestCase):
 
     def test_already_compact_unchanged_semantically(self):

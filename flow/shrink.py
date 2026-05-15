@@ -42,6 +42,16 @@ from .formatter import format_source
 MATH_TO_OP = {"add": "+", "sub": "-", "mul": "*", "div": "/"}
 AGGS = {"count", "sum", "min", "max", "avg"}
 
+# Inverted comparison operators for negation flips (`!(a == b)` → `a != b`).
+INVERTED_CMP = {
+    "==": "!=",
+    "!=": "==",
+    "<":  ">=",
+    "<=": ">",
+    ">":  "<=",
+    ">=": "<",
+}
+
 # FuncCalls considered safe to inline (no side effects, deterministic).
 PURE_BUILTINS = {"count", "sum", "min", "max", "abs", "len", "round",
                  "int", "float", "str"}
@@ -52,9 +62,110 @@ def shrink_source(src: str) -> str:
 
 
 def shrink(program: Program) -> Program:
+    program.body = _simplify_in_body(program.body)
     program.body = _shrink_block(program.body)
     program = _inline_single_use(program)
     return program
+
+
+# ============================================================
+# Value-level simplifier (negation flips, double-negation, not-bool)
+# ============================================================
+
+
+def _simplify_value(v):
+    if isinstance(v, UnaryOp):
+        inner = _simplify_value(v.value)
+        if v.op == "not":
+            if isinstance(inner, UnaryOp) and inner.op == "not":
+                return inner.value
+            if isinstance(inner, BoolLit):
+                return BoolLit(not inner.value)
+            if isinstance(inner, BinOp) and inner.op in INVERTED_CMP:
+                return BinOp(INVERTED_CMP[inner.op], inner.left, inner.right)
+        return UnaryOp(v.op, inner)
+    if isinstance(v, BinOp):
+        return BinOp(v.op, _simplify_value(v.left), _simplify_value(v.right))
+    if isinstance(v, Ternary):
+        return Ternary(_simplify_value(v.cond),
+                       _simplify_value(v.then),
+                       _simplify_value(v.else_))
+    if isinstance(v, FuncCall):
+        return FuncCall(v.name, [_simplify_value(a) for a in v.args])
+    if isinstance(v, ListLit):
+        return ListLit([_simplify_value(x) for x in v.items])
+    if isinstance(v, DictLit):
+        return DictLit([(k, _simplify_value(vv)) for k, vv in v.entries])
+    if isinstance(v, MethodCall):
+        return MethodCall(
+            receiver=_simplify_value(v.receiver),
+            method=v.method,
+            args=None if v.args is None else [_simplify_value(a) for a in v.args],
+        )
+    if isinstance(v, IndexAccess):
+        return IndexAccess(receiver=_simplify_value(v.receiver),
+                           index=_simplify_value(v.index))
+    if isinstance(v, Spread):
+        return Spread(_simplify_value(v.value))
+    if isinstance(v, Range):
+        return Range(_simplify_value(v.start), _simplify_value(v.end))
+    if isinstance(v, FString):
+        new_parts = []
+        for kind, payload in v.parts:
+            if kind == "expr":
+                new_parts.append(("expr", _simplify_value(payload)))
+            else:
+                new_parts.append((kind, payload))
+        return FString(parts=new_parts)
+    return v
+
+
+def _simplify_in_body(body):
+    """Apply _simplify_value to every value-typed field in body recursively."""
+    for s in body:
+        if isinstance(s, Call):
+            s.args = [Arg(a.name, _simplify_value(a.value)) for a in s.args]
+        elif isinstance(s, AssignStmt):
+            s.value = _simplify_value(s.value)
+        elif isinstance(s, MultiAssignStmt):
+            s.value = _simplify_value(s.value)
+        elif isinstance(s, IfStmt):
+            s.cond = _simplify_value(s.cond)
+            _simplify_in_body(s.then)
+            if s.else_:
+                _simplify_in_body(s.else_)
+        elif isinstance(s, EachStmt):
+            s.iterable = _simplify_value(s.iterable)
+            _simplify_in_body(s.body)
+        elif isinstance(s, RepeatStmt):
+            s.count = _simplify_value(s.count)
+            _simplify_in_body(s.body)
+        elif isinstance(s, WhileStmt):
+            s.cond = _simplify_value(s.cond)
+            _simplify_in_body(s.body)
+        elif isinstance(s, WhenStmt):
+            s.args = [_simplify_value(a) for a in s.args]
+            _simplify_in_body(s.body)
+        elif isinstance(s, TryStmt):
+            _simplify_in_body(s.try_body)
+            _simplify_in_body(s.catch_body)
+        elif isinstance(s, DefStmt):
+            _simplify_in_body(s.body)
+        elif isinstance(s, ReturnStmt):
+            if s.value is not None:
+                s.value = _simplify_value(s.value)
+        elif isinstance(s, ExprStmt):
+            s.value = _simplify_value(s.value)
+        elif isinstance(s, MatchStmt):
+            s.value = _simplify_value(s.value)
+            new_cases = []
+            for pat, case_body in s.cases:
+                _simplify_in_body(case_body)
+                new_cases.append((pat, case_body))
+            s.cases = new_cases
+            if s.else_body is not None:
+                _simplify_in_body(s.else_body)
+    return body
 
 
 def _shrink_block(body):
