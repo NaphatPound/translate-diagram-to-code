@@ -31,7 +31,9 @@ from .verbs import VERBS
 
 
 MATH_TO_OP = {"add": "+", "sub": "-", "mul": "*", "div": "/"}
-AGGS = {"count", "sum", "min", "max", "avg"}
+OF_FUNCS = {"count", "sum", "min", "max", "avg", "keys", "values"}
+FROM_FUNCS = {"reverse", "unique"}
+AGGS = OF_FUNCS  # back-compat alias for callers
 
 
 @dataclass
@@ -388,14 +390,25 @@ def _check_call(call: Call, out: List[LintWarning]) -> None:
             ))
             suggested = True
 
-    # 2. Aggregator verbs with -> name → assignment with funccall.
-    if not suggested and call.verb in AGGS and call.out:
+    # 2. Aggregator / dict-view verbs with -> name → assignment with funccall.
+    if not suggested and call.verb in OF_FUNCS and call.out:
         of = _arg_src(call, "of")
         if of:
             out.append(LintWarning(
                 call.line,
                 f"`{call.verb} of=... -> {call.out}` can be an assignment",
                 f"{call.out} = {call.verb}({of})",
+            ))
+            suggested = True
+
+    # 2b. List-transform verbs with -> name → assignment with funccall.
+    if not suggested and call.verb in FROM_FUNCS and call.out:
+        fr = _arg_src(call, "from")
+        if fr:
+            out.append(LintWarning(
+                call.line,
+                f"`{call.verb} from=... -> {call.out}` can be an assignment",
+                f"{call.out} = {call.verb}({fr})",
             ))
             suggested = True
 

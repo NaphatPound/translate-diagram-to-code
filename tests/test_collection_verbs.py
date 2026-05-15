@@ -98,6 +98,52 @@ class TestPipeFromName(unittest.TestCase):
         self.assertIn("datetime.now()", py)
 
 
+class TestFuncCallForms(unittest.TestCase):
+    """`p reverse(xs)` / `p unique(xs)` / `p keys(d)` etc. must work directly,
+    not require going through a verb-form assignment first."""
+
+    def test_reverse_funccall(self):
+        self.assertEqual(_run_python("xs = [1, 2, 3]\np reverse(xs)"), "[3, 2, 1]")
+
+    def test_unique_funccall(self):
+        self.assertEqual(_run_python("xs = [1, 1, 2]\np unique(xs)"), "[1, 2]")
+
+    def test_keys_funccall(self):
+        self.assertEqual(_run_python('d = {"a": 1, "b": 2}\np keys(d)'), "['a', 'b']")
+
+    def test_values_funccall(self):
+        self.assertEqual(_run_python('d = {"a": 1, "b": 2}\np values(d)'), "[1, 2]")
+
+    def test_avg_funccall(self):
+        self.assertEqual(_run_python("xs = [1, 2, 3, 4]\np avg(xs)"), "2.5")
+
+    def test_sum_funccall(self):
+        self.assertEqual(_run_python("xs = [1, 2, 3]\np sum(xs)"), "6")
+
+    def test_sorted_funccall(self):
+        self.assertEqual(_run_python("xs = [3, 1, 2]\np sorted(xs)"), "[1, 2, 3]")
+
+
+class TestShrinkToFunccall(unittest.TestCase):
+    """`reverse from=xs -> ys / p ys` should shrink + inline to `p reverse(xs)`."""
+
+    def test_reverse_shrinks_to_funccall(self):
+        from flow.shrink import shrink_source
+        out = shrink_source("xs = [1, 2, 3]\nreverse from=xs -> ys\np ys")
+        self.assertIn("reverse(", out)
+        self.assertNotIn("reverse from=", out)
+
+    def test_unique_shrinks_to_funccall(self):
+        from flow.shrink import shrink_source
+        out = shrink_source("xs = [1, 1, 2]\nunique from=xs -> ys\np ys")
+        self.assertIn("unique(", out)
+
+    def test_keys_shrinks_to_funccall(self):
+        from flow.shrink import shrink_source
+        out = shrink_source('d = {"a": 1}\nkeys of=d -> ks\np ks')
+        self.assertIn("keys(", out)
+
+
 class TestDocLists(unittest.TestCase):
     """New verbs should appear in `flow doc`."""
 

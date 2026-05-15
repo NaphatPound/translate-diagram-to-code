@@ -1003,8 +1003,29 @@ class _Compiler:
             "str":   {"python": "str", "js": "String",            "go": "fmt.Sprintf", "rust": "format!", "bash": ""},
             "int":   {"python": "int", "js": "parseInt",          "go": "int",     "rust": "i64::from", "bash": ""},
             "float": {"python": "float","js": "parseFloat",       "go": "float64", "rust": "f64::from", "bash": ""},
+            "sum":   {"python": "sum", "js": "<no-op>",           "go": "<no-op>", "rust": "<no-op>",   "bash": ""},
+            "round": {"python": "round","js": "Math.round",       "go": "<no-op>", "rust": "<no-op>",   "bash": ""},
+            "sorted":{"python": "sorted","js": "<no-op>",         "go": "<no-op>", "rust": "<no-op>",   "bash": ""},
+        }
+        # Single-arg verb funccalls that need a template (not just a name swap).
+        # Keyed by (lang, verb). The arg-rendered string is substituted in.
+        VERB_TEMPLATES = {
+            ("python", "reverse"): "list(reversed({0}))",
+            ("python", "unique"):  "list(dict.fromkeys({0}))",
+            ("python", "keys"):    "list(({0}).keys())",
+            ("python", "values"):  "list(({0}).values())",
+            ("python", "avg"):     "(sum({0}) / len({0}))",
+            ("js",     "reverse"): "[...({0})].reverse()",
+            ("js",     "unique"):  "[...new Set({0})]",
+            ("js",     "keys"):    "Object.keys({0})",
+            ("js",     "values"):  "Object.values({0})",
+            ("js",     "sum"):     "({0}).reduce((a,b)=>a+b,0)",
+            ("js",     "sorted"):  "[...({0})].sort()",
         }
         args = ", ".join(self._render_value(a) for a in f.args)
+        tmpl = VERB_TEMPLATES.get((self.lang, f.name))
+        if tmpl is not None and len(f.args) == 1:
+            return tmpl.format(args)
         if f.name in BUILTINS and BUILTINS[f.name].get(self.lang, "<no-op>") != "<no-op>":
             return f"{BUILTINS[f.name][self.lang]}({args})"
         return f"{f.name}({args})"

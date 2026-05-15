@@ -40,7 +40,11 @@ from .formatter import format_source
 
 
 MATH_TO_OP = {"add": "+", "sub": "-", "mul": "*", "div": "/"}
-AGGS = {"count", "sum", "min", "max", "avg"}
+# Single-arg verbs that can be rewritten as `out = verb(input)`.
+# Keyed by the input arg name in the verb signature.
+OF_FUNCS = {"count", "sum", "min", "max", "avg", "keys", "values"}
+FROM_FUNCS = {"reverse", "unique"}
+AGGS = OF_FUNCS  # back-compat alias for callers
 
 # Inverted comparison operators for negation flips (`!(a == b)` → `a != b`).
 INVERTED_CMP = {
@@ -54,7 +58,8 @@ INVERTED_CMP = {
 
 # FuncCalls considered safe to inline (no side effects, deterministic).
 PURE_BUILTINS = {"count", "sum", "min", "max", "abs", "len", "round",
-                 "int", "float", "str"}
+                 "int", "float", "str",
+                 "reverse", "unique", "keys", "values", "avg", "sorted"}
 
 
 def shrink_source(src: str) -> str:
@@ -252,12 +257,21 @@ def _try_call_to_assign(call: Call) -> Optional[AssignStmt]:
                 line=call.line,
             )
 
-    if call.verb in AGGS:
+    if call.verb in OF_FUNCS:
         of = _arg(call, "of")
         if of is not None and len(call.args) == 1:
             return AssignStmt(
                 target=call.out,
                 value=FuncCall(call.verb, [of]),
+                line=call.line,
+            )
+
+    if call.verb in FROM_FUNCS:
+        fr = _arg(call, "from")
+        if fr is not None and len(call.args) == 1:
+            return AssignStmt(
+                target=call.out,
+                value=FuncCall(call.verb, [fr]),
                 line=call.line,
             )
     return None
