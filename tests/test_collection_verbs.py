@@ -66,6 +66,36 @@ class TestCollectionVerbsJS(unittest.TestCase):
         self.assertIn("Object.values", VERBS["values"].templates["js"])
 
 
+class TestPipeFromLiteral(unittest.TestCase):
+    """Any value expression can start a pipe, not just identifiers."""
+
+    def test_list_literal_pipe(self):
+        self.assertEqual(_run_python("[1, 2, 3] | reverse | p"), "[3, 2, 1]")
+
+    def test_string_literal_pipe(self):
+        self.assertEqual(_run_python('"hello" | upper | p'), "HELLO")
+
+    def test_dict_literal_pipe(self):
+        out = _run_python('{"a": 1, "b": 2} | keys | p')
+        self.assertEqual(out, "['a', 'b']")
+
+    def test_parenthesized_expr_pipe(self):
+        # Pipe the result of an expression directly into `print`.
+        out = _run_python('(1 + 2) | p')
+        self.assertEqual(out, "3")
+
+    def test_pipe_with_arrow_capture(self):
+        out = _run_python(
+            "[3, 1, 2] | unique -> ys\n"
+            "p ys"
+        )
+        self.assertEqual(out, "[3, 1, 2]")
+
+    def test_pipe_with_postfix_if(self):
+        out = _run_python('[1, 2, 3] | p if true')
+        self.assertEqual(out, "[1, 2, 3]")
+
+
 class TestPipeFromName(unittest.TestCase):
     """`<ident> | verb` should pipe the variable into `verb`'s primary arg,
     not be parsed as a zero-arg verb call."""

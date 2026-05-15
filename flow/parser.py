@@ -1193,9 +1193,48 @@ class _Parser:
         self.idx += 1
         return ReturnStmt(value=value, line=line.line_no)
 
-    def _parse_expr_stmt(self, line: _Line) -> ExprStmt:
+    def _parse_expr_stmt(self, line: _Line):
         toks = line.tokens
         value, i = self._parse_expr(toks, 0, line.line_no)
+        # Pipe-from-value: `<expr> | verb | ...`. Lower to a synthetic
+        # `_pN = <expr>` assignment followed by the rest of the pipeline.
+        if i < len(toks) and toks[i].kind == "PIPE":
+            name = self._fresh_pipe_name()
+            stmts: List = [AssignStmt(target=name, value=value, line=line.line_no)]
+            pipe_in = name
+            i += 1
+            postfix_if_cond: Optional[Value] = None
+            while i < len(toks):
+                call, i = self._parse_call_segment(toks, i, line.line_no, pipe_in)
+                stmts.append(call)
+                if i >= len(toks):
+                    break
+                if toks[i].kind in ("KW_IF", "KW_UNLESS"):
+                    is_unless = (toks[i].kind == "KW_UNLESS")
+                    i += 1
+                    postfix_if_cond, i = self._parse_expr(toks, i, line.line_no)
+                    if is_unless:
+                        postfix_if_cond = UnaryOp("not", postfix_if_cond)
+                    if i < len(toks):
+                        raise ParseError(
+                            f"unexpected token after postfix-if: {toks[i].value!r}",
+                            toks[i].line, toks[i].col,
+                        )
+                    break
+                if toks[i].kind != "PIPE":
+                    raise ParseError(
+                        f"unexpected token after call: {toks[i].value!r}",
+                        toks[i].line, toks[i].col,
+                    )
+                i += 1
+                if call.out is None:
+                    call.out = self._fresh_pipe_name()
+                pipe_in = call.out
+            self.idx += 1
+            if postfix_if_cond is not None:
+                return IfStmt(cond=postfix_if_cond, then=stmts,
+                              else_=None, line=line.line_no)
+            return stmts
         if i != len(toks):
             raise ParseError(
                 f"unexpected token after expression: {toks[i].value!r}",

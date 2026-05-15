@@ -12,7 +12,8 @@ Output Flow source only. No prose, fences, or commentary.
 - Verb call: `verb arg=value -> name` (first arg can be positional).
 - Assignment: `name = expr`, `a, b = expr`, `name += expr`.
 - Pipe: `a | b | c` (output flows into next call's primary arg).
-  A bare variable can start a pipe: `xs | reverse | p`.
+  Any value can start a pipe: `xs | reverse | p`, `[1,2,3] | sum | p`,
+  `"hello" | upper | p`.
 - Builtin funccalls (1-arg, return a value, no `-> name` needed):
   `count(xs) sum(xs) min(xs) max(xs) avg(xs) sorted(xs) reverse(xs)
    unique(xs) keys(d) values(d) len(s) abs(n) round(n) str(x) int(x) float(x)`.
