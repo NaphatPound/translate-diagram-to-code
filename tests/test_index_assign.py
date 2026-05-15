@@ -48,6 +48,48 @@ class TestIndexAssign(unittest.TestCase):
         self.assertEqual(out, "{'name': 'Flow'}")
 
 
+class TestCompoundIndexAssign(unittest.TestCase):
+    """`xs[0] += 5`, `d["k"] *= 2`, etc. — common counter/accumulator idioms."""
+
+    def test_list_plus_eq(self):
+        self.assertEqual(_run("xs = [1, 2, 3]\nxs[0] += 5\np xs"),
+                         "[6, 2, 3]")
+
+    def test_dict_plus_eq(self):
+        self.assertEqual(_run('d = {"a": 1}\nd["a"] += 10\np d'),
+                         "{'a': 11}")
+
+    def test_minus_eq(self):
+        self.assertEqual(_run('d = {"a": 5}\nd["a"] -= 2\np d'),
+                         "{'a': 3}")
+
+    def test_times_eq(self):
+        self.assertEqual(_run("xs = [1, 2]\nxs[1] *= 3\np xs"),
+                         "[1, 6]")
+
+    def test_div_eq(self):
+        self.assertEqual(_run('d = {"x": 10}\nd["x"] /= 2\np d'),
+                         "{'x': 5.0}")
+
+    def test_accumulator_pattern(self):
+        out = _run(
+            'counts = {"hits": 0, "misses": 0}\n'
+            'each result in [true, false, true, true]\n'
+            '  if result\n'
+            '    counts["hits"] += 1\n'
+            '  else\n'
+            '    counts["misses"] += 1\n'
+            "p counts"
+        )
+        self.assertEqual(out, "{'hits': 3, 'misses': 1}")
+
+    def test_compiles_to_assign(self):
+        # Should desugar to `xs[0] = xs[0] + 5`, not `+=` syntax in output.
+        py = compile_to(parse("xs = [1]\nxs[0] += 5"), "python")
+        # Either form is OK; just check it doesn't error.
+        self.assertIn("xs[0]", py)
+
+
 class TestTupleRHS(unittest.TestCase):
 
     def test_two_targets_two_values(self):

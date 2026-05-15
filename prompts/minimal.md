@@ -15,7 +15,8 @@ Output Flow source only. No prose, fences, or commentary.
 ## Statements
 - Verb call: `verb arg=value -> name` (first arg can be positional).
 - Assignment: `name = expr`, `a, b = expr`, `a, b = e1, e2` (tuple RHS),
-  `d["k"] = v` / `xs[i] = v` (index assign), `name += expr`.
+  `d["k"] = v` / `xs[i] = v` (index assign), `name += expr`,
+  `xs[i] += v` / `d["k"] *= v` (compound index assign).
 - Pipe: `a | b | c` (output flows into next call's primary arg).
   Any value can start a pipe: `xs | reverse | p`, `[1,2,3] | sum | p`,
   `"hello" | upper | p`.
