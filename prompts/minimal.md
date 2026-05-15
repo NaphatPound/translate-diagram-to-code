@@ -20,7 +20,8 @@ Output Flow source only. No prose, fences, or commentary.
    len(s) abs(n) round(n) str(x) int(x) float(x)`.
 - Control: `if cond / else`, `unless`, `while`, `each x in xs`,
   `each k, v in dict`, `repeat N as i`, `break`, `continue`,
-  `try / catch e`, `return value`.
+  `try / catch e`, `return value`,
+  `match v / case PAT / ... / case x` (last `case <fresh-name>` binds v to x).
 - Postfix: `X if cond`, `X unless cond`.
 - Function: `def name p1 p2=default` + body (last bare expr is the return).
 

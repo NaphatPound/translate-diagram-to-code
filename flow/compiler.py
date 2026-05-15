@@ -198,7 +198,13 @@ class _Compiler:
             raise CompileError(f"unknown statement type: {type(stmt).__name__}")
 
     def emit_match(self, stmt: MatchStmt) -> None:
-        """Lower `match value` to a chained if/elif/else over `== pattern`."""
+        """Lower `match value` to a chained if/elif/else over `== pattern`.
+
+        Special case: if the LAST case's pattern is a bare identifier that
+        isn't already in scope, it's a *binding pattern* — it always matches,
+        and the matched value is bound to that name inside the body. Replaces
+        the verbose `else / x = matched_value` idiom.
+        """
         val_src = self._render_value(stmt.value)
         tmp = self._fresh_temp("_m")
         # Emit the cache assignment.
@@ -213,9 +219,23 @@ class _Compiler:
         elif self.lang == "bash":
             self._emit(f"{tmp}={val_src}")
         self.scope.add(tmp)
+
+        # Detect a trailing binding-pattern case.
+        cases = stmt.cases
+        binding_name: Optional[str] = None
+        binding_body: Optional[list] = None
+        if cases and not stmt.else_body:
+            last_pat, last_body = cases[-1]
+            if (isinstance(last_pat, Name)
+                    and len(last_pat.parts) == 1
+                    and last_pat.parts[0] not in self.scope):
+                binding_name = last_pat.parts[0]
+                binding_body = last_body
+                cases = cases[:-1]
+
         # Lang-specific helpers for `if cond` / `else if cond` / `else` / close.
         is_c_like = self.lang in ("js", "go", "rust")
-        for idx, (pat, body) in enumerate(stmt.cases):
+        for idx, (pat, body) in enumerate(cases):
             pat_src = self._render_value(pat)
             if self.lang == "python":
                 kw = "if" if idx == 0 else "elif"
@@ -239,8 +259,44 @@ class _Compiler:
                 for s in body:
                     self.emit_stmt(s)
                 self.indent -= 1
-        # Trailing else / close.
-        if stmt.else_body:
+        # Trailing else / binding / close.
+        if binding_name is not None:
+            self.scope.add(binding_name)
+            if not cases:
+                # No prior cases — emit bind + body inline.
+                if self.lang == "python":
+                    self._emit(f"{binding_name} = {tmp}")
+                elif is_c_like:
+                    decl = "const " if self.lang == "js" else "var " if self.lang == "go" else "let "
+                    self._emit(f"{decl}{binding_name} = {tmp};")
+                elif self.lang == "bash":
+                    self._emit(f"{binding_name}={tmp}")
+                for s in binding_body:
+                    self.emit_stmt(s)
+            else:
+                if self.lang == "python":
+                    self._emit("else:")
+                    self._block_open()
+                    self._emit(f"{binding_name} = {tmp}")
+                    for s in binding_body:
+                        self.emit_stmt(s)
+                    self._block_close()
+                elif self.lang == "bash":
+                    self._emit("else")
+                    self._block_open()
+                    self._emit(f"{binding_name}={tmp}")
+                    for s in binding_body:
+                        self.emit_stmt(s)
+                    self.indent -= 1
+                elif is_c_like:
+                    decl = "const " if self.lang == "js" else "var " if self.lang == "go" else "let "
+                    self._emit("} else {")
+                    self._block_open()
+                    self._emit(f"{decl}{binding_name} = {tmp};")
+                    for s in binding_body:
+                        self.emit_stmt(s)
+                    self._block_close()
+        elif stmt.else_body:
             if self.lang == "python":
                 self._emit("else:")
                 self._block_open()
@@ -260,7 +316,7 @@ class _Compiler:
                     self.emit_stmt(s)
                 self._block_close()
         else:
-            if is_c_like:
+            if is_c_like and cases:
                 self._emit("}")
         if self.lang == "bash":
             self._emit("fi")
