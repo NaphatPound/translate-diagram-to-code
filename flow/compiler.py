@@ -1007,31 +1007,56 @@ class _Compiler:
             "round": {"python": "round","js": "Math.round",       "go": "<no-op>", "rust": "<no-op>",   "bash": ""},
             "sorted":{"python": "sorted","js": "<no-op>",         "go": "<no-op>", "rust": "<no-op>",   "bash": ""},
         }
-        # Single-arg verb funccalls that need a template (not just a name swap).
-        # Keyed by (lang, verb). The arg-rendered string is substituted in.
+        # Verb funccalls that need a template (not just a name swap).
+        # Keyed by (lang, verb) → (arity, template). Args are rendered
+        # individually and slotted in via {0}/{1}/...
         VERB_TEMPLATES = {
-            ("python", "reverse"): "list(reversed({0}))",
-            ("python", "unique"):  "list(dict.fromkeys({0}))",
-            ("python", "keys"):    "list(({0}).keys())",
-            ("python", "values"):  "list(({0}).values())",
-            ("python", "avg"):     "(sum({0}) / len({0}))",
-            ("python", "first"):   "(({0})[0] if ({0}) else None)",
-            ("python", "last"):    "(({0})[-1] if ({0}) else None)",
-            ("python", "flatten"): "[_y for _x in ({0}) for _y in _x]",
-            ("js",     "reverse"): "[...({0})].reverse()",
-            ("js",     "unique"):  "[...new Set({0})]",
-            ("js",     "keys"):    "Object.keys({0})",
-            ("js",     "values"):  "Object.values({0})",
-            ("js",     "sum"):     "({0}).reduce((a,b)=>a+b,0)",
-            ("js",     "sorted"):  "[...({0})].sort()",
-            ("js",     "first"):   "({0})[0]",
-            ("js",     "last"):    "({0})[({0}).length - 1]",
-            ("js",     "flatten"): "({0}).flat()",
+            # ---- Python: single-arg ----
+            ("python", "reverse"): (1, "list(reversed({0}))"),
+            ("python", "unique"):  (1, "list(dict.fromkeys({0}))"),
+            ("python", "keys"):    (1, "list(({0}).keys())"),
+            ("python", "values"):  (1, "list(({0}).values())"),
+            ("python", "avg"):     (1, "(sum({0}) / len({0}))"),
+            ("python", "first"):   (1, "(({0})[0] if ({0}) else None)"),
+            ("python", "last"):    (1, "(({0})[-1] if ({0}) else None)"),
+            ("python", "flatten"): (1, "[_y for _x in ({0}) for _y in _x]"),
+            ("python", "upper"):   (1, "({0}).upper()"),
+            ("python", "lower"):   (1, "({0}).lower()"),
+            ("python", "trim"):    (1, "({0}).strip()"),
+            # ---- Python: multi-arg ----
+            ("python", "replace"): (3, "({0}).replace({1}, {2})"),
+            ("python", "split"):   (2, "({0}).split({1})"),
+            ("python", "join"):    (2, "({1}).join(str(_x) for _x in {0})"),
+            ("python", "contains"):(2, "({1}) in ({0})"),
+            ("python", "zip"):     (2, "[list(_p) for _p in zip({0}, {1})]"),
+            ("python", "format"):  (2, "({0}).format(**({1}))"),
+            # ---- JS: single-arg ----
+            ("js",     "reverse"): (1, "[...({0})].reverse()"),
+            ("js",     "unique"):  (1, "[...new Set({0})]"),
+            ("js",     "keys"):    (1, "Object.keys({0})"),
+            ("js",     "values"):  (1, "Object.values({0})"),
+            ("js",     "sum"):     (1, "({0}).reduce((a,b)=>a+b,0)"),
+            ("js",     "sorted"):  (1, "[...({0})].sort()"),
+            ("js",     "first"):   (1, "({0})[0]"),
+            ("js",     "last"):    (1, "({0})[({0}).length - 1]"),
+            ("js",     "flatten"): (1, "({0}).flat()"),
+            ("js",     "upper"):   (1, "({0}).toUpperCase()"),
+            ("js",     "lower"):   (1, "({0}).toLowerCase()"),
+            ("js",     "trim"):    (1, "({0}).trim()"),
+            # ---- JS: multi-arg ----
+            ("js",     "replace"): (3, "({0}).split({1}).join({2})"),
+            ("js",     "split"):   (2, "({0}).split({1})"),
+            ("js",     "join"):    (2, "({0}).join({1})"),
+            ("js",     "contains"):(2, "({0}).includes({1})"),
+            ("js",     "zip"):     (2, "({0}).map((_v, _i) => [_v, ({1})[_i]])"),
         }
+        spec = VERB_TEMPLATES.get((self.lang, f.name))
+        if spec is not None:
+            arity, tmpl = spec
+            if len(f.args) == arity:
+                rendered = [self._render_value(a) for a in f.args]
+                return tmpl.format(*rendered)
         args = ", ".join(self._render_value(a) for a in f.args)
-        tmpl = VERB_TEMPLATES.get((self.lang, f.name))
-        if tmpl is not None and len(f.args) == 1:
-            return tmpl.format(args)
         if f.name in BUILTINS and BUILTINS[f.name].get(self.lang, "<no-op>") != "<no-op>":
             return f"{BUILTINS[f.name][self.lang]}({args})"
         return f"{f.name}({args})"

@@ -66,6 +66,57 @@ class TestCollectionVerbsJS(unittest.TestCase):
         self.assertIn("Object.values", VERBS["values"].templates["js"])
 
 
+class TestMultiArgFuncCalls(unittest.TestCase):
+    """Multi-arg verb funccalls compile to proper target-language code."""
+
+    def test_replace(self):
+        self.assertEqual(_run_python('p replace("hello", "l", "L")'), "heLLo")
+
+    def test_split(self):
+        self.assertEqual(_run_python('p split("a,b,c", ",")'), "['a', 'b', 'c']")
+
+    def test_join(self):
+        self.assertEqual(_run_python('p join(["a", "b", "c"], ", ")'), "a, b, c")
+
+    def test_contains(self):
+        self.assertEqual(_run_python('p contains("hello", "ell")'), "True")
+
+    def test_zip(self):
+        self.assertEqual(_run_python('p zip([1, 2], ["a", "b"])'),
+                         "[[1, 'a'], [2, 'b']]")
+
+    def test_upper_funccall(self):
+        self.assertEqual(_run_python('p upper("hi")'), "HI")
+
+    def test_trim_funccall(self):
+        self.assertEqual(_run_python('p trim("  hi  ")'), "hi")
+
+
+class TestMultiArgShrink(unittest.TestCase):
+    """Verb form → funccall form for multi-arg verbs."""
+
+    def test_replace_shrinks(self):
+        from flow.shrink import shrink_source
+        out = shrink_source(
+            'replace text="hello" find="l" to="L" -> r\np r'
+        )
+        self.assertIn("replace(", out)
+        self.assertNotIn("replace text=", out)
+
+    def test_join_shrinks_positional(self):
+        from flow.shrink import shrink_source
+        out = shrink_source('join ["a", "b"] sep="," -> r\np r')
+        self.assertIn("join(", out)
+
+    def test_count_positional_shrinks(self):
+        # Regression: positional `count xs -> n` should now collapse like
+        # `count of=xs -> n` does.
+        from flow.shrink import shrink_source
+        out = shrink_source("count xs -> n\np n")
+        self.assertIn("count(", out)
+        self.assertNotIn("count xs", out)
+
+
 class TestExtraCollectionVerbs(unittest.TestCase):
     """first / last / flatten / zip — common collection ops."""
 

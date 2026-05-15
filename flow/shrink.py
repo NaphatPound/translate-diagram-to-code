@@ -46,6 +46,17 @@ OF_FUNCS = {"count", "sum", "min", "max", "avg", "keys", "values"}
 FROM_FUNCS = {"reverse", "unique", "first", "last", "flatten"}
 AGGS = OF_FUNCS  # back-compat alias for callers
 
+# Multi-arg verbs that can be rewritten as funccalls. Value lists the arg
+# names in the order the target funccall expects them.
+MULTI_FUNCS = {
+    "replace":  ["text", "find", "to"],
+    "split":    ["text", "sep"],
+    "join":     ["from", "sep"],
+    "contains": ["text", "find"],
+    "zip":      ["a", "b"],
+    "format":   ["template", "data"],
+}
+
 # Inverted comparison operators for negation flips (`!(a == b)` → `a != b`).
 INVERTED_CMP = {
     "==": "!=",
@@ -60,7 +71,9 @@ INVERTED_CMP = {
 PURE_BUILTINS = {"count", "sum", "min", "max", "abs", "len", "round",
                  "int", "float", "str",
                  "reverse", "unique", "keys", "values", "avg", "sorted",
-                 "first", "last", "flatten"}
+                 "first", "last", "flatten",
+                 "replace", "split", "join", "contains", "zip", "format",
+                 "upper", "lower", "trim"}
 
 
 def shrink_source(src: str) -> str:
@@ -258,24 +271,52 @@ def _try_call_to_assign(call: Call) -> Optional[AssignStmt]:
                 line=call.line,
             )
 
-    if call.verb in OF_FUNCS:
-        of = _arg(call, "of")
-        if of is not None and len(call.args) == 1:
+    if call.verb in OF_FUNCS and len(call.args) == 1:
+        norm = _normalize_args(call)
+        of = norm.get("of")
+        if of is not None:
             return AssignStmt(
                 target=call.out,
                 value=FuncCall(call.verb, [of]),
                 line=call.line,
             )
 
-    if call.verb in FROM_FUNCS:
-        fr = _arg(call, "from")
-        if fr is not None and len(call.args) == 1:
+    if call.verb in FROM_FUNCS and len(call.args) == 1:
+        norm = _normalize_args(call)
+        fr = norm.get("from")
+        if fr is not None:
             return AssignStmt(
                 target=call.out,
                 value=FuncCall(call.verb, [fr]),
                 line=call.line,
             )
+
+    if call.verb in MULTI_FUNCS:
+        norm = _normalize_args(call)
+        arg_names = MULTI_FUNCS[call.verb]
+        if len(norm) == len(arg_names) and all(n in norm for n in arg_names):
+            ordered = [norm[n] for n in arg_names]
+            return AssignStmt(
+                target=call.out,
+                value=FuncCall(call.verb, ordered),
+                line=call.line,
+            )
     return None
+
+
+def _normalize_args(call) -> dict:
+    """Build {name: value} for the call, mapping `<pos>` to the verb's
+    primary_arg so positional and named forms compare equal."""
+    from .verbs import VERBS
+    spec = VERBS.get(call.verb)
+    primary = spec.primary_arg if spec else None
+    result = {}
+    for a in call.args:
+        name = a.name
+        if name == "<pos>" and primary:
+            name = primary
+        result[name] = a.value
+    return result
 
 
 def _try_mirror_if_to_ternary(stmt: IfStmt):
