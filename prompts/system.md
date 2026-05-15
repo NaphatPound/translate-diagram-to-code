@@ -97,6 +97,18 @@ follow these rules exactly. The parser is strict; deviations will fail.
     now permitted as positional values and named-arg values without parens.
 25. **String concat** uses `+`: `"hello, " + name`. Slightly shorter than
     `f"hello, {name}"` for one-variable interpolation.
+26. **Unary not** — `!x` or `not x`. Both parse to the same UnaryOp:
+        if !found
+          p "missing"
+27. **Try/catch** — `try` block followed by `catch [name]` block at the same
+    indent. `name` is bound to the error in the catch body; omit to use `_e`.
+        try
+          r "data.json" -> raw
+          load file=raw -> cfg
+        catch e
+          p f"failed: {e}"
+    Compiles to native try/except (Python), try/catch (JS), defer/recover
+    (Go), match-on-Result (Rust), subshell+`|| handler` (Bash).
 
 ## Verb categories (you may only use these verbs)
 

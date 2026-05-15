@@ -27,8 +27,8 @@ from typing import List, Optional, Union, Tuple, Any
 # AST
 # ============================================================
 
-Value = Union["StringLit", "NumberLit", "BoolLit", "Name", "FuncCall", "BinOp", "ListLit", "DictLit", "Ternary", "Range", "FString", "MethodCall", "IndexAccess"]
-Stmt = Union["Call", "AssignStmt", "IfStmt", "EachStmt", "RepeatStmt", "WhenStmt"]
+Value = Union["StringLit", "NumberLit", "BoolLit", "Name", "FuncCall", "BinOp", "UnaryOp", "ListLit", "DictLit", "Ternary", "Range", "FString", "MethodCall", "IndexAccess"]
+Stmt = Union["Call", "AssignStmt", "IfStmt", "EachStmt", "RepeatStmt", "WhenStmt", "TryStmt"]
 
 
 @dataclass
@@ -70,6 +70,14 @@ class BinOp:
     left: Value
     right: Value
     kind: str = "binop"
+
+
+@dataclass
+class UnaryOp:
+    """Prefix unary: `not x`, `!x`. `op` is the canonical name (e.g. 'not')."""
+    op: str
+    value: Value
+    kind: str = "unary"
 
 
 @dataclass
@@ -191,6 +199,16 @@ class WhenStmt:
 
 
 @dataclass
+class TryStmt:
+    """`try ... catch [name] ...`. catch_var is None when user wrote bare `catch`."""
+    try_body: List[Stmt]
+    catch_var: Optional[str]
+    catch_body: List[Stmt]
+    line: int
+    kind: str = "try"
+
+
+@dataclass
 class Program:
     body: List[Stmt]
     kind: str = "program"
@@ -214,7 +232,8 @@ class ParseError(Exception):
 # Tokenizer
 # ============================================================
 
-KEYWORDS = {"if", "else", "each", "in", "repeat", "when", "as", "and", "or", "not", "true", "false"}
+KEYWORDS = {"if", "else", "each", "in", "repeat", "when", "as", "try", "catch",
+            "and", "or", "not", "true", "false"}
 
 # Single-letter aliases for the most common verbs. The parser substitutes
 # the canonical name before constructing the Call node.
@@ -242,6 +261,7 @@ TOKEN_SPEC = [
     ("ANDOP", r"&&"),
     ("PIPE", r"\|"),
     ("QMARK", r"\?"),
+    ("BANG", r"!"),
     ("OP", r"[=<>+\-*/]"),
     ("NUMBER", r"\d+(?:\.\d+)?"),
     ("LPAREN", r"\("),
@@ -404,6 +424,8 @@ class _Parser:
             return self._parse_repeat(base_indent)
         if first.kind == "KW_WHEN":
             return self._parse_when(base_indent)
+        if first.kind == "KW_TRY":
+            return self._parse_try(base_indent)
         if first.kind == "KW_ELSE":
             raise ParseError("'else' without matching 'if'", line.line_no, 1)
         if first.kind == "WORD":
@@ -561,6 +583,9 @@ class _Parser:
         # Unary minus at start of a value: -5, -name, -(expr)
         if t.kind == "OP" and t.value == "-":
             return True
+        # Unary not at start of a value: !x or `not x`
+        if t.kind in ("BANG", "KW_NOT"):
+            return True
         return False
 
     # ---------- value / expression ----------
@@ -645,6 +670,10 @@ class _Parser:
             if isinstance(inner, NumberLit):
                 return NumberLit(-inner.value), j
             return BinOp("-", NumberLit(0.0), inner), j
+        # Unary not: `!x`, `not x`.
+        if t.kind == "BANG" or t.kind == "KW_NOT":
+            inner, j = self._parse_primary(toks, i + 1, line_no)
+            return UnaryOp("not", inner), j
         if t.kind == "STRING":
             return StringLit(t.value), i + 1
         if t.kind == "FSTRING":
@@ -858,6 +887,35 @@ class _Parser:
         self.idx += 1
         body, _ = self._parse_block(base_indent + 1)
         return RepeatStmt(count, body, line.line_no, var=var)
+
+    def _parse_try(self, base_indent: int) -> TryStmt:
+        line = self.lines[self.idx]
+        toks = line.tokens
+        if len(toks) != 1:
+            raise ParseError("'try' must be alone on its line",
+                             toks[1].line, toks[1].col)
+        self.idx += 1
+        try_body, _ = self._parse_block(base_indent + 1)
+        # Expect a 'catch' at the same indent.
+        if self.idx >= len(self.lines):
+            raise ParseError("expected 'catch' after 'try' block", line.line_no, 1)
+        nxt = self.lines[self.idx]
+        if nxt.indent != base_indent or not nxt.tokens or nxt.tokens[0].kind != "KW_CATCH":
+            raise ParseError("expected 'catch' at same indent as 'try'",
+                             nxt.line_no, 1)
+        ctoks = nxt.tokens
+        catch_var: Optional[str] = None
+        if len(ctoks) == 1:
+            pass  # bare `catch`
+        elif len(ctoks) == 2 and ctoks[1].kind == "WORD" and _is_ident(ctoks[1].value):
+            catch_var = ctoks[1].value
+        else:
+            raise ParseError("`catch` accepts at most one variable name",
+                             ctoks[1].line, ctoks[1].col)
+        self.idx += 1
+        catch_body, _ = self._parse_block(base_indent + 1)
+        return TryStmt(try_body=try_body, catch_var=catch_var,
+                       catch_body=catch_body, line=line.line_no)
 
     def _parse_when(self, base_indent: int) -> WhenStmt:
         line = self.lines[self.idx]

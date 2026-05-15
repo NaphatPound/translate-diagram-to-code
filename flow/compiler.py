@@ -19,8 +19,8 @@ import re
 from typing import List, Set
 
 from .parser import (
-    Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhenStmt,
-    StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, Arg,
+    Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhenStmt, TryStmt,
+    StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, Arg,
     ListLit, DictLit, Ternary, Range, FString, MethodCall, IndexAccess,
 )
 
@@ -175,8 +175,106 @@ class _Compiler:
             self.emit_repeat(stmt)
         elif isinstance(stmt, WhenStmt):
             self.emit_when(stmt)
+        elif isinstance(stmt, TryStmt):
+            self.emit_try(stmt)
         else:
             raise CompileError(f"unknown statement type: {type(stmt).__name__}")
+
+    def emit_try(self, stmt: TryStmt) -> None:
+        var = stmt.catch_var or "_e"
+        if self.lang == "python":
+            self._emit("try:")
+            self._block_open()
+            for s in stmt.try_body:
+                self.emit_stmt(s)
+            self._block_close()
+            self._emit(f"except Exception as {var}:")
+            prev = var in self.scope
+            self.scope.add(var)
+            self._block_open()
+            for s in stmt.catch_body:
+                self.emit_stmt(s)
+            if not prev:
+                self.scope.discard(var)
+            self._block_close()
+            return
+        if self.lang == "js":
+            self._emit("try {")
+            self._block_open()
+            for s in stmt.try_body:
+                self.emit_stmt(s)
+            self.indent -= 1
+            self._emit(f"}} catch ({var}) {{")
+            self._block_open()
+            prev = var in self.scope
+            self.scope.add(var)
+            for s in stmt.catch_body:
+                self.emit_stmt(s)
+            if not prev:
+                self.scope.discard(var)
+            self._block_close()
+            return
+        if self.lang == "rust":
+            # Rust uses Result; emit a best-effort match against a closure.
+            self._emit(f"match (|| -> Result<_, Box<dyn std::error::Error>> {{")
+            self._block_open()
+            for s in stmt.try_body:
+                self.emit_stmt(s)
+            self._emit("Ok(())")
+            self.indent -= 1
+            self._emit(f"}})() {{")
+            self._block_open()
+            self._emit(f"Ok(_) => {{}},")
+            self._emit(f"Err({var}) => {{")
+            self._block_open()
+            prev = var in self.scope
+            self.scope.add(var)
+            for s in stmt.catch_body:
+                self.emit_stmt(s)
+            if not prev:
+                self.scope.discard(var)
+            self.indent -= 1
+            self._emit("}}")
+            self.indent -= 1
+            self._emit("};")
+            return
+        if self.lang == "go":
+            # Go: defer+recover() approximates a catch block.
+            self._emit("func() {")
+            self._block_open()
+            self._emit("defer func() {")
+            self._block_open()
+            self._emit(f"if {var} := recover(); {var} != nil {{")
+            self._block_open()
+            prev = var in self.scope
+            self.scope.add(var)
+            for s in stmt.catch_body:
+                self.emit_stmt(s)
+            if not prev:
+                self.scope.discard(var)
+            self._block_close()  # if
+            self._block_close()  # func()
+            self._emit("}()")
+            for s in stmt.try_body:
+                self.emit_stmt(s)
+            self._block_close()  # outer func
+            self._emit("}()")
+            return
+        if self.lang == "bash":
+            # Bash: run the try-body in a subshell; on failure run catch.
+            self._emit("if ( ")
+            self._block_open()
+            for s in stmt.try_body:
+                self.emit_stmt(s)
+            self.indent -= 1
+            self._emit(") ; then :; else")
+            self._block_open()
+            for s in stmt.catch_body:
+                self.emit_stmt(s)
+            self.indent -= 1
+            self._emit("fi")
+            return
+        raise CompileError(f"try/catch not supported for lang {self.lang!r}")
 
     def emit_assign(self, stmt: AssignStmt) -> None:
         val_src = self._render_value(stmt.value)
@@ -512,6 +610,15 @@ class _Compiler:
             elif op == "or":
                 op = "or"  if self.lang == "python" else "||"
             return f"({l} {op} {r})"
+        if isinstance(v, UnaryOp):
+            inner = self._render_value(v.value)
+            if v.op == "not":
+                if self.lang == "python":
+                    return f"(not {inner})"
+                if self.lang == "bash":
+                    return f"(! {inner})"
+                return f"(!{inner})"
+            raise CompileError(f"unknown unary op {v.op!r}")
         if isinstance(v, Ternary):
             cond = self._render_value(v.cond)
             then = self._render_value(v.then)

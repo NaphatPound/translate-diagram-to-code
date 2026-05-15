@@ -17,8 +17,8 @@ import re
 from typing import List
 
 from .parser import (
-    Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhenStmt,
-    StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, Arg,
+    Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhenStmt, TryStmt,
+    StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, Arg,
     ListLit, DictLit, Ternary, Range, FString, MethodCall, IndexAccess,
 )
 
@@ -81,6 +81,13 @@ def _emit_stmt(stmt, depth: int, out: List[str], usage: dict) -> None:
         extras = " ".join(_fmt_value(a) for a in stmt.args)
         out.append(f"{_INDENT * depth}when {stmt.event}" + (f" {extras}" if extras else ""))
         _emit_block(stmt.body, depth + 1, out, usage)
+        return
+    if isinstance(stmt, TryStmt):
+        out.append(_INDENT * depth + "try")
+        _emit_block(stmt.try_body, depth + 1, out, usage)
+        head = "catch" + (f" {stmt.catch_var}" if stmt.catch_var else "")
+        out.append(_INDENT * depth + head)
+        _emit_block(stmt.catch_body, depth + 1, out, usage)
         return
     raise ValueError(f"unknown statement: {type(stmt).__name__}")
 
@@ -186,6 +193,9 @@ def _count_in_block(body, counts):
             for a in stmt.args:
                 _count_in_value(a, counts)
             _count_in_block(stmt.body, counts)
+        elif isinstance(stmt, TryStmt):
+            _count_in_block(stmt.try_body, counts)
+            _count_in_block(stmt.catch_body, counts)
 
 
 def _count_in_value(value, counts):
@@ -222,6 +232,8 @@ def _count_in_value(value, counts):
     elif isinstance(value, IndexAccess):
         _count_in_value(value.receiver, counts)
         _count_in_value(value.index, counts)
+    elif isinstance(value, UnaryOp):
+        _count_in_value(value.value, counts)
 
 
 # ---------- calls ----------
@@ -305,6 +317,8 @@ def _fmt_value(v) -> str:
         l = _fmt_value(v.left)
         r = _fmt_value(v.right)
         return f"({l} {v.op} {r})"
+    if isinstance(v, UnaryOp):
+        return f"(!{_fmt_value(v.value)})" if v.op == "not" else f"({v.op} {_fmt_value(v.value)})"
     if isinstance(v, ListLit):
         return "[" + ", ".join(_fmt_value(x) for x in v.items) + "]"
     if isinstance(v, DictLit):

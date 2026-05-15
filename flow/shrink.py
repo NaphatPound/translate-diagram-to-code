@@ -31,8 +31,8 @@ from typing import List, Optional
 
 from . import parse
 from .parser import (
-    Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhenStmt,
-    StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, ListLit, DictLit,
+    Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhenStmt, TryStmt,
+    StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, ListLit, DictLit,
     Ternary, Range, FString, MethodCall, IndexAccess, Arg,
 )
 from .formatter import format_source
@@ -74,6 +74,12 @@ def _shrink_block(body):
             continue
         if isinstance(stmt, (EachStmt, RepeatStmt, WhenStmt)):
             stmt.body = _shrink_block(stmt.body)
+            new.append(stmt)
+            i += 1
+            continue
+        if isinstance(stmt, TryStmt):
+            stmt.try_body = _shrink_block(stmt.try_body)
+            stmt.catch_body = _shrink_block(stmt.catch_body)
             new.append(stmt)
             i += 1
             continue
@@ -187,6 +193,9 @@ def _walk_all(body):
                 yield from _walk_all(s.else_)
         elif isinstance(s, (EachStmt, RepeatStmt, WhenStmt)):
             yield from _walk_all(s.body)
+        elif isinstance(s, TryStmt):
+            yield from _walk_all(s.try_body)
+            yield from _walk_all(s.catch_body)
 
 
 def _is_safe_to_inline(value) -> bool:
@@ -237,6 +246,9 @@ def _count_in_body(body, counts) -> None:
             for a in s.args:
                 _count_in_value(a, counts)
             _count_in_body(s.body, counts)
+        elif isinstance(s, TryStmt):
+            _count_in_body(s.try_body, counts)
+            _count_in_body(s.catch_body, counts)
 
 
 def _count_in_value(value, counts) -> None:
@@ -274,6 +286,8 @@ def _count_in_value(value, counts) -> None:
     elif isinstance(value, IndexAccess):
         _count_in_value(value.receiver, counts)
         _count_in_value(value.index, counts)
+    elif isinstance(value, UnaryOp):
+        _count_in_value(value.value, counts)
 
 
 def _replace_and_drop(body, inlines):
@@ -302,6 +316,9 @@ def _replace_and_drop(body, inlines):
         elif isinstance(stmt, WhenStmt):
             stmt.args = [_replace_value(a, inlines) for a in stmt.args]
             stmt.body = _replace_and_drop(stmt.body, inlines)
+        elif isinstance(stmt, TryStmt):
+            stmt.try_body = _replace_and_drop(stmt.try_body, inlines)
+            stmt.catch_body = _replace_and_drop(stmt.catch_body, inlines)
         new.append(stmt)
     return new
 
@@ -359,4 +376,6 @@ def _replace_value(value, inlines, _expanding=None):
             receiver=_replace_value(value.receiver, inlines, _expanding),
             index=_replace_value(value.index, inlines, _expanding),
         )
+    if isinstance(value, UnaryOp):
+        return UnaryOp(value.op, _replace_value(value.value, inlines, _expanding))
     return value
