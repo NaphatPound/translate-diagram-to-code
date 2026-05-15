@@ -572,10 +572,19 @@ class _Compiler:
                 ctx[name] = arg.value.value
             else:
                 ctx[name] = self._render_value(arg.value)
-        # Fill missing args (declared but not provided) with safe defaults
+        # Fill missing args (declared but not provided) with safe defaults.
+        # For raw_args (predicates / key expressions), substitute an identity
+        # so missing-pred verbs behave as no-ops rather than runtime errors:
+        #   filter from=xs              ≡ filter from=xs where="True" → xs
+        #   map    from=xs              ≡ map    from=xs to="x"       → xs
+        #   sort   from=xs              ≡ sort   from=xs by="x"       → sorted(xs)
+        _RAW_IDENTITY = {"where": "True", "to": "x", "by": "x"}
         for arg_name in spec.args:
             if arg_name not in ctx:
-                ctx[arg_name] = "None" if self.lang == "python" else "null"
+                if arg_name in spec.raw_args:
+                    ctx[arg_name] = _RAW_IDENTITY.get(arg_name, "x")
+                else:
+                    ctx[arg_name] = "None" if self.lang == "python" else "null"
         ctx["out"] = call.out or "_"
 
         try:
