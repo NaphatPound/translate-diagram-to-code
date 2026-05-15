@@ -264,10 +264,11 @@ def generate(
         if verbose:
             print(code, file=sys.stderr)
 
-        # Validate: parse + compile.
+        # Validate: parse + compile. Pass source so errors carry a caret
+        # pointer the LLM can use to find the issue on retry.
         try:
             ast = parse(code)
-            compile_to(ast, "python")   # checks verb/arg validity too
+            compile_to(ast, "python", source=code)
             break  # accepted — proceed to polish
         except (ParseError, CompileError) as e:
             last_error = str(e)

@@ -308,6 +308,28 @@ class ParseError(Exception):
         loc = f"line {line}" + (f":{col}" if col else "")
         super().__init__(f"{loc}: {msg}")
 
+    def with_source(self, source_lines: list) -> "ParseError":
+        """Attach a source-line snippet with a `^` caret. Returns self."""
+        if 0 < self.line <= len(source_lines):
+            self.args = (_format_error_with_caret(
+                self.msg, source_lines, self.line, self.col,
+            ),)
+        return self
+
+
+def _format_error_with_caret(msg: str, source_lines: list, line: int, col: int) -> str:
+    """Render `line N:C: msg\\n    <src>\\n        ^` for human / LLM eyes."""
+    loc = f"line {line}" + (f":{col}" if col else "")
+    if 0 < line <= len(source_lines):
+        src = source_lines[line - 1]
+        # Strip trailing whitespace but keep leading indent for accurate caret.
+        src = src.rstrip()
+        out = f"{loc}: {msg}\n    {src}"
+        if col > 0:
+            out += "\n    " + " " * (col - 1) + "^"
+        return out
+    return f"{loc}: {msg}"
+
 
 # ============================================================
 # Tokenizer
@@ -1535,9 +1557,13 @@ def _parse_fstring(content: str, line: int, col: int) -> "FString":
 
 def parse(src: str) -> Program:
     """Parse Flow source into an AST. Raises ParseError on failure."""
-    src = _preprocess_triple_strings(src)
-    lines = _split_lines(src)
-    return _Parser(lines).parse_program()
+    src_for_caret = src.splitlines()
+    src_pp = _preprocess_triple_strings(src)
+    lines = _split_lines(src_pp)
+    try:
+        return _Parser(lines).parse_program()
+    except ParseError as e:
+        raise e.with_source(src_for_caret)
 
 
 def _preprocess_triple_strings(src: str) -> str:

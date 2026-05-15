@@ -36,6 +36,13 @@ class CompileError(Exception):
         loc = f"line {line}: " if line else ""
         super().__init__(f"{loc}{msg}")
 
+    def with_source(self, source_lines: list) -> "CompileError":
+        """Attach the offending source line for nicer __str__. Returns self."""
+        if 0 < self.line <= len(source_lines):
+            src = source_lines[self.line - 1].rstrip()
+            self.args = (f"line {self.line}: {self.msg}\n    {src}",)
+        return self
+
 
 SUPPORTED_LANGS = ("python", "js", "go", "rust", "bash")
 
@@ -45,12 +52,23 @@ SUPPORTED_LANGS = ("python", "js", "go", "rust", "bash")
 # ============================================================
 
 
-def compile_to(program: Program, lang: str) -> str:
+def compile_to(program: Program, lang: str, source: str = "") -> str:
+    """Compile a parsed Program to the target language.
+
+    `source` is the original Flow source string; when provided, CompileError
+    messages include the offending line + caret pointer for nicer feedback
+    (both human-readable and useful for the LLM retry loop).
+    """
     if lang not in SUPPORTED_LANGS:
         raise CompileError(f"unsupported target language: {lang!r} "
                            f"(supported: {', '.join(SUPPORTED_LANGS)})")
     c = _Compiler(lang)
-    c.emit_program(program)
+    try:
+        c.emit_program(program)
+    except CompileError as e:
+        if source:
+            raise e.with_source(source.splitlines())
+        raise
     src = c.source()
     if lang == "python":
         src = _hoist_python_imports(src)
