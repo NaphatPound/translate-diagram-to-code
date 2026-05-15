@@ -31,7 +31,7 @@ from typing import List, Optional
 
 from . import parse
 from .parser import (
-    Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhileStmt, WhenStmt, TryStmt,
+    Program, Call, AssignStmt, MultiAssignStmt, IfStmt, EachStmt, RepeatStmt, WhileStmt, WhenStmt, TryStmt,
     DefStmt, ReturnStmt, ExprStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, ListLit, DictLit,
     Ternary, Range, FString, MethodCall, IndexAccess, Spread, Arg,
@@ -239,6 +239,8 @@ def _count_in_body(body, counts) -> None:
                 _count_in_value(a.value, counts)
         elif isinstance(s, AssignStmt):
             _count_in_value(s.value, counts)
+        elif isinstance(s, MultiAssignStmt):
+            _count_in_value(s.value, counts)
         elif isinstance(s, IfStmt):
             _count_in_value(s.cond, counts)
             _count_in_body(s.then, counts)
@@ -321,6 +323,8 @@ def _replace_and_drop(body, inlines):
         if isinstance(stmt, Call):
             stmt.args = [Arg(a.name, _replace_value(a.value, inlines)) for a in stmt.args]
         elif isinstance(stmt, AssignStmt):
+            stmt.value = _replace_value(stmt.value, inlines)
+        elif isinstance(stmt, MultiAssignStmt):
             stmt.value = _replace_value(stmt.value, inlines)
         elif isinstance(stmt, IfStmt):
             stmt.cond = _replace_value(stmt.cond, inlines)

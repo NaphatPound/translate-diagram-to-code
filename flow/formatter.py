@@ -17,7 +17,7 @@ import re
 from typing import List
 
 from .parser import (
-    Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhileStmt, WhenStmt, TryStmt,
+    Program, Call, AssignStmt, MultiAssignStmt, IfStmt, EachStmt, RepeatStmt, WhileStmt, WhenStmt, TryStmt,
     BreakStmt, ContinueStmt, DefStmt, ReturnStmt, ExprStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, Arg,
     ListLit, DictLit, Ternary, Range, FString, MethodCall, IndexAccess, Spread,
@@ -59,6 +59,9 @@ def _emit_stmt(stmt, depth: int, out: List[str], usage: dict) -> None:
         return
     if isinstance(stmt, AssignStmt):
         out.append(f"{_INDENT * depth}{stmt.target} = {_fmt_value(stmt.value)}")
+        return
+    if isinstance(stmt, MultiAssignStmt):
+        out.append(f"{_INDENT * depth}{', '.join(stmt.targets)} = {_fmt_value(stmt.value)}")
         return
     if isinstance(stmt, IfStmt):
         out.append(_INDENT * depth + "if " + _fmt_value(stmt.cond))
@@ -207,6 +210,8 @@ def _count_in_block(body, counts):
             for a in stmt.args:
                 _count_in_value(a.value, counts)
         elif isinstance(stmt, AssignStmt):
+            _count_in_value(stmt.value, counts)
+        elif isinstance(stmt, MultiAssignStmt):
             _count_in_value(stmt.value, counts)
         elif isinstance(stmt, IfStmt):
             _count_in_value(stmt.cond, counts)

@@ -28,7 +28,7 @@ from typing import List, Optional, Union, Tuple, Any
 # ============================================================
 
 Value = Union["StringLit", "NumberLit", "BoolLit", "Name", "FuncCall", "BinOp", "UnaryOp", "ListLit", "DictLit", "Ternary", "Range", "FString", "MethodCall", "IndexAccess", "Spread"]
-Stmt = Union["Call", "AssignStmt", "IfStmt", "EachStmt", "RepeatStmt", "WhileStmt", "WhenStmt", "TryStmt", "BreakStmt", "ContinueStmt", "DefStmt", "ReturnStmt", "ExprStmt"]
+Stmt = Union["Call", "AssignStmt", "MultiAssignStmt", "IfStmt", "EachStmt", "RepeatStmt", "WhileStmt", "WhenStmt", "TryStmt", "BreakStmt", "ContinueStmt", "DefStmt", "ReturnStmt", "ExprStmt"]
 
 
 @dataclass
@@ -168,6 +168,15 @@ class AssignStmt:
     value: Value
     line: int
     kind: str = "assign"
+
+
+@dataclass
+class MultiAssignStmt:
+    """`a, b = expr` — unpacks the RHS into multiple targets in order."""
+    targets: List[str]
+    value: Value
+    line: int
+    kind: str = "multi_assign"
 
 
 @dataclass
@@ -526,6 +535,11 @@ class _Parser:
             raise ParseError("'else' without matching 'if'", line.line_no, 1)
         if first.kind == "WORD":
             toks = line.tokens
+            # Multi-target assignment: `a, b = expr`. Check via lookahead.
+            if (len(toks) >= 4
+                    and toks[1].kind == "COMMA"
+                    and _looks_like_multi_assign(toks)):
+                return self._parse_multi_assign(line)
             # Assignment: `name = expr`. Check that toks[1] is `=` (not `==`).
             if (len(toks) >= 3
                     and toks[1].kind == "OP" and toks[1].value == "="):
@@ -543,6 +557,38 @@ class _Parser:
         raise ParseError(
             f"expected verb or keyword, got {first.value!r}", first.line, first.col
         )
+
+    def _parse_multi_assign(self, line: _Line) -> "MultiAssignStmt":
+        """`a, b = expr` — multiple targets separated by `,` then a single `=`."""
+        toks = line.tokens
+        targets: List[str] = [toks[0].value]
+        i = 1
+        while i < len(toks) and toks[i].kind == "COMMA":
+            i += 1
+            if i >= len(toks) or toks[i].kind != "WORD" or not _is_ident(toks[i].value):
+                raise ParseError(
+                    f"expected identifier after ',' in multi-assign",
+                    toks[i].line if i < len(toks) else line.line_no,
+                    toks[i].col if i < len(toks) else 1,
+                )
+            targets.append(toks[i].value)
+            i += 1
+        if i >= len(toks) or toks[i].kind != "OP" or toks[i].value != "=":
+            raise ParseError(
+                f"expected '=' after multi-assign targets",
+                toks[i].line if i < len(toks) else line.line_no,
+                toks[i].col if i < len(toks) else 1,
+            )
+        i += 1
+        value, i = self._parse_expr(toks, i, line.line_no)
+        if i != len(toks):
+            extra = toks[i]
+            raise ParseError(
+                f"unexpected token after multi-assign expression: {extra.value!r}",
+                extra.line, extra.col,
+            )
+        self.idx += 1
+        return MultiAssignStmt(targets=targets, value=value, line=line.line_no)
 
     def _parse_compound_assign(self, line: _Line) -> "AssignStmt":
         """`name += expr` desugars to `name = name + expr`. Same for `-= *= /=`."""
@@ -1210,6 +1256,25 @@ class _Parser:
 
 
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _looks_like_multi_assign(toks) -> bool:
+    """Return True iff `toks` is `WORD , WORD (, WORD)* OP=`.
+    Used as a lookahead in _parse_stmt to disambiguate from pipelines.
+    """
+    if not toks or toks[0].kind != "WORD" or not _is_ident(toks[0].value):
+        return False
+    i = 1
+    while i < len(toks):
+        if toks[i].kind == "OP" and toks[i].value == "=":
+            return i >= 3  # need at least one comma + name before the '='
+        if toks[i].kind != "COMMA":
+            return False
+        i += 1
+        if i >= len(toks) or toks[i].kind != "WORD" or not _is_ident(toks[i].value):
+            return False
+        i += 1
+    return False
 
 _OP_PRECEDENCE = {
     "??": 1,  # null-coalescing — lowest, paired with or

@@ -19,7 +19,7 @@ import re
 from typing import List, Set
 
 from .parser import (
-    Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhileStmt, WhenStmt, TryStmt,
+    Program, Call, AssignStmt, MultiAssignStmt, IfStmt, EachStmt, RepeatStmt, WhileStmt, WhenStmt, TryStmt,
     BreakStmt, ContinueStmt, DefStmt, ReturnStmt, ExprStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, Arg,
     ListLit, DictLit, Ternary, Range, FString, MethodCall, IndexAccess, Spread,
@@ -168,6 +168,8 @@ class _Compiler:
             self.emit_call(stmt)
         elif isinstance(stmt, AssignStmt):
             self.emit_assign(stmt)
+        elif isinstance(stmt, MultiAssignStmt):
+            self.emit_multi_assign(stmt)
         elif isinstance(stmt, IfStmt):
             self.emit_if(stmt)
         elif isinstance(stmt, EachStmt):
@@ -360,6 +362,28 @@ class _Compiler:
             self._emit("fi")
             return
         raise CompileError(f"try/catch not supported for lang {self.lang!r}")
+
+    def emit_multi_assign(self, stmt: MultiAssignStmt) -> None:
+        val_src = self._render_value(stmt.value)
+        # All targets enter scope.
+        for t in stmt.targets:
+            self.scope.add(t)
+        targets_str = ", ".join(stmt.targets)
+        if self.lang == "python":
+            self._emit(f"{targets_str} = {val_src}")
+        elif self.lang == "js":
+            self._emit(f"let [{targets_str}] = {val_src};")
+        elif self.lang == "rust":
+            self._emit(f"let ({targets_str}) = {val_src};")
+        elif self.lang == "go":
+            # Go can do this only via type assertion; emit a best-effort comment + index.
+            self._emit(f"// multi-assign: {targets_str} = {val_src}")
+            for i, t in enumerate(stmt.targets):
+                self._emit(f"var {t} = ({val_src})[{i}]")
+        elif self.lang == "bash":
+            # Bash array indexing.
+            for i, t in enumerate(stmt.targets):
+                self._emit(f"{t}=\"${{{val_src.lstrip('$')}[{i}]}}\"")
 
     def emit_assign(self, stmt: AssignStmt) -> None:
         val_src = self._render_value(stmt.value)

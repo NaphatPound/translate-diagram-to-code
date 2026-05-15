@@ -170,6 +170,11 @@ follow these rules exactly. The parser is strict; deviations will fail.
         combined = [*xs, *ys, 0]
         biggest = max(*nums)
     Renders to `*xs` in Python, `...xs` in JS, `xs...` in Go.
+37. **Tuple destructuring** — `a, b = expr` unpacks an iterable into multiple
+    targets in order. Useful with funccalls that return a list:
+        pair = [10, 20]
+        a, b = pair                       # a=10, b=20
+        lo, hi = minmax([3, 1, 4, 1, 5])  # unpack a [min, max] return
 
 ## Verb categories (you may only use these verbs)
 
