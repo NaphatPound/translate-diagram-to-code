@@ -144,6 +144,30 @@ _v("split", "data", "Split string by separator",
    python="{out} = ({text}).split({sep})",
    js="const {out} = ({text}).split({sep});")
 
+_v("reverse", "data", "Reverse a list (non-mutating)",
+   {"from": "list"},
+   returns=True,
+   python="{out} = list(reversed({from}))",
+   js="const {out} = [...({from})].reverse();")
+
+_v("unique", "data", "Deduplicate a list, preserving first-seen order",
+   {"from": "list"},
+   returns=True,
+   python="{out} = list(dict.fromkeys({from}))",
+   js="const {out} = [...new Set({from})];")
+
+_v("keys", "data", "Keys of a dict/object",
+   {"of": "dict"},
+   returns=True,
+   python="{out} = list(({of}).keys())",
+   js="const {out} = Object.keys({of});")
+
+_v("values", "data", "Values of a dict/object",
+   {"of": "dict"},
+   returns=True,
+   python="{out} = list(({of}).values())",
+   js="const {out} = Object.values({of});")
+
 
 # ============================================================
 # math  (green)
@@ -404,6 +428,8 @@ _PRIMARY = {
     "load": "file", "save": "value",
     "filter": "from", "map": "from", "sort": "from",
     "take": "from", "skip": "from",
+    "reverse": "from", "unique": "from",
+    "keys": "of", "values": "of",
     "count": "of", "join": "from", "split": "text",
     "sum": "of", "avg": "of", "min": "of", "max": "of",
     "round": "value",

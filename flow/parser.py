@@ -667,12 +667,29 @@ class _Parser:
 
     def _parse_pipeline(self, line: _Line):
         """Parse a (possibly piped) call line. Returns Call, List[Call], or
-        IfStmt when a trailing `if <cond>` wraps the line."""
+        IfStmt when a trailing `if <cond>` wraps the line.
+
+        Special case: a bare identifier followed by `|` is treated as the
+        pipe SOURCE (a variable being piped into the next verb) rather than
+        a zero-arg verb call. So `xs | reverse | p` works without writing
+        `reverse from=xs | p`. Skipped if the identifier names a known verb
+        (e.g. `now | format ...`), which keeps zero-arg verb pipes working.
+        """
+        from .verbs import VERBS
         toks = line.tokens
         calls: List[Call] = []
         i = 0
         pipe_in: Optional[str] = None
         postfix_if_cond: Optional[Value] = None
+        # Pipe-from-name: `<ident> | ...`.
+        if (len(toks) >= 2
+                and toks[0].kind == "WORD"
+                and _is_ident(toks[0].value)
+                and toks[1].kind == "PIPE"
+                and toks[0].value not in VERBS
+                and toks[0].value not in VERB_ALIASES):
+            pipe_in = toks[0].value
+            i = 2
         while i < len(toks):
             call, i = self._parse_call_segment(toks, i, line.line_no, pipe_in)
             calls.append(call)
