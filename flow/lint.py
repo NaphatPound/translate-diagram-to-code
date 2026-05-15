@@ -480,7 +480,10 @@ def cli_main(args) -> None:
     import sys
     from pathlib import Path
 
-    src = Path(args.file).read_text(encoding="utf-8")
+    if args.file == "-":
+        src = sys.stdin.read()
+    else:
+        src = Path(args.file).read_text(encoding="utf-8")
     try:
         program = parse(src)
     except ParseError as e:
@@ -491,7 +494,7 @@ def cli_main(args) -> None:
     if getattr(args, "fix", False):
         from .shrink import shrink_source
         out = shrink_source(src)
-        if getattr(args, "write", False):
+        if getattr(args, "write", False) and args.file != "-":
             Path(args.file).write_text(out, encoding="utf-8")
             print(f"wrote {args.file}", file=sys.stderr)
         else:

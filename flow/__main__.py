@@ -19,6 +19,14 @@ from . import parse, compile_to, ast_to_dict, ParseError, CompileError
 
 
 def _read(path: str) -> str:
+    """Read Flow source from a file path, or `-` to read from stdin.
+
+    Stdin support lets you chain commands:
+      flow gen "say hi" | flow check -
+      flow shrink - < draft.flow
+    """
+    if path == "-":
+        return sys.stdin.read()
     return Path(path).read_text(encoding="utf-8")
 
 
@@ -84,7 +92,7 @@ def cmd_fmt(args):
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(2)
     formatted = format_source(ast)
-    if args.write:
+    if args.write and args.file != "-":
         Path(args.file).write_text(formatted, encoding="utf-8")
     else:
         sys.stdout.write(formatted)
@@ -123,7 +131,7 @@ def cmd_shrink(args):
     except ParseError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(2)
-    if args.write:
+    if args.write and args.file != "-":
         Path(args.file).write_text(out, encoding="utf-8")
     else:
         sys.stdout.write(out)
