@@ -109,6 +109,43 @@ def cmd_shrink(args):
         sys.stdout.write(out)
 
 
+def cmd_examples(args):
+    """Print curated example .flow programs. `--list` shows names + summaries,
+    otherwise `--all` dumps every example, or `<name>` prints one example."""
+    examples_dir = Path(__file__).resolve().parent.parent / "examples"
+    files = sorted(examples_dir.glob("*.flow"))
+    if not files:
+        print("(no examples in examples/)", file=sys.stderr)
+        sys.exit(2)
+
+    if args.list:
+        for p in files:
+            summary = ""
+            for line in p.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line.startswith("#"):
+                    summary = line.lstrip("# ").strip()
+                    break
+                if line:
+                    break
+            print(f"{p.stem:18}  {summary}")
+        return
+
+    if args.name:
+        target = examples_dir / f"{args.name}.flow"
+        if not target.exists():
+            print(f"ERROR: no example named {args.name!r}", file=sys.stderr)
+            sys.exit(2)
+        sys.stdout.write(target.read_text(encoding="utf-8"))
+        return
+
+    # Default: dump everything (handy for LLM context priming).
+    for p in files:
+        sys.stdout.write(f"# === {p.stem} ===\n")
+        sys.stdout.write(p.read_text(encoding="utf-8"))
+        sys.stdout.write("\n")
+
+
 def cmd_render(args):
     """Emit a standalone HTML file that renders this program's blocks.
 
@@ -204,6 +241,12 @@ def main():
     psh.add_argument("-w", "--write", action="store_true",
                      help="overwrite the file in place")
     psh.set_defaults(func=cmd_shrink)
+
+    pe = sub.add_parser("examples", help="print curated example programs")
+    pe.add_argument("name", nargs="?", help="example name (e.g. functions); omit to dump all")
+    pe.add_argument("--list", action="store_true",
+                    help="list example names + one-line summaries")
+    pe.set_defaults(func=cmd_examples)
 
     args = p.parse_args()
     args.func(args)

@@ -1,0 +1,25 @@
+# Lists, dicts, range, spread, destructure, index.
+xs = 1..10
+total = sum(xs)
+p f"sum 1..10 = {total}"
+
+# Index + slice.
+p xs[0]
+p xs[-1]
+p xs[2..5]
+
+# Spread to merge lists.
+ys = [100, 200]
+combined = [*xs, *ys, 999]
+n = count(combined)
+p f"len = {n}"
+
+# Dict.
+user = {name: "alice", age: 30}
+p user["name"]
+p user?.age
+
+# Destructure a 2-element list.
+pair = [10, 20]
+a, b = pair
+p f"a={a} b={b}"

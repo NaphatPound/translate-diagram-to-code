@@ -1,0 +1,20 @@
+# Realistic combo: load → transform → reduce → format → print.
+def report items label="result"
+  n = count(items)
+  total = sum(items)
+  avg = total / n
+  p f"{label}: count={n} total={total} avg={avg}"
+
+nums = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5]
+
+# Filter even / odd numbers via the canonical verb-call syntax.
+filter from=nums where="x % 2 == 0" -> evens
+report(evens, "evens")
+
+filter from=nums where="x % 2 == 1" -> odds
+report(odds, "odds")
+
+# Compact summary via ternary + index.
+n = count(nums)
+status = nums[0] > nums[-1] ? "decreasing" : "non-decreasing"
+p f"trend: {status} (first={nums[0]}, last={nums[-1]}, n={n})"

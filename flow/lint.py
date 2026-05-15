@@ -22,7 +22,7 @@ from typing import List, Optional
 from . import parse, ParseError
 from .parser import (
     Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhenStmt,
-    StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, ListLit, DictLit,
+    StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, ListLit, DictLit,
 )
 from .verbs import VERBS
 
@@ -69,6 +69,7 @@ def _walk(stmt, out: List[LintWarning]) -> None:
     elif isinstance(stmt, AssignStmt):
         pass  # already in the compact form
     elif isinstance(stmt, IfStmt):
+        _check_if(stmt, out)
         for s in stmt.then:
             _walk(s, out)
         if stmt.else_:
@@ -77,6 +78,22 @@ def _walk(stmt, out: List[LintWarning]) -> None:
     elif isinstance(stmt, (EachStmt, RepeatStmt, WhenStmt)):
         for s in stmt.body:
             _walk(s, out)
+
+
+def _check_if(stmt: IfStmt, out: List[LintWarning]) -> None:
+    """`if !cond` (or `if not cond`) without an else → `unless cond`."""
+    cond = stmt.cond
+    if (isinstance(cond, UnaryOp) and cond.op == "not"
+            and stmt.else_ is None and len(stmt.then) == 1):
+        # Single-stmt then-block w/ negated cond → suggest postfix unless.
+        inner = _value_to_src(cond.value)
+        # Find what the single stmt looks like by re-formatting it. For
+        # simplicity we just describe the rewrite — the user can apply.
+        out.append(LintWarning(
+            stmt.line,
+            f"`if !{inner}` with a single-stmt body can use postfix `unless`",
+            f"<body> unless {inner}",
+        ))
 
 
 # ---------- per-call checks ----------

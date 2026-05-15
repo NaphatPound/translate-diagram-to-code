@@ -1,0 +1,21 @@
+# String operations: methods, slice, f-string, concat.
+# F-string placeholders use the TARGET language's expression syntax
+# (Python here), so keep them to simple variable names. For Flow-style
+# expressions, compute first and assign to a name, then interpolate.
+
+s = "  Hello, World!  "
+clean = s.strip()
+upper = clean.upper()
+n = count(upper)
+head = upper[0..4]
+tail = upper[7..11]
+p f"len={n}, first={head}, last={tail}"
+
+# Concat with `+` plus a method chain.
+parts = clean.split(",")
+first = parts[0].strip()
+p f"first part: {first}"
+
+# Simple template with two interpolations.
+name = "alice"; age = 30
+p f"hi {name}, age {age}"

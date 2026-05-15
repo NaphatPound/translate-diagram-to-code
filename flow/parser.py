@@ -335,7 +335,7 @@ TOKEN_SPEC = [
     ("PIPE", r"\|"),
     ("QMARK", r"\?"),
     ("BANG", r"!"),
-    ("OP", r"[=<>+\-*/]"),
+    ("OP", r"[=<>+\-*/%]"),
     ("NUMBER", r"\d+(?:\.\d+)?"),
     ("LPAREN", r"\("),
     ("RPAREN", r"\)"),
@@ -1288,7 +1288,7 @@ _OP_PRECEDENCE = {
     "or":  1, "and": 2,
     "==": 3, "!=": 3, "<":  3, ">":  3, "<=": 3, ">=": 3,
     "+":  4, "-":  4,
-    "*":  5, "/":  5,
+    "*":  5, "/":  5, "%":  5,
 }
 
 
@@ -1318,7 +1318,10 @@ def _split_word_path(w: str) -> List[str]:
     return w.split(".")
 
 
-_FSTRING_PLACEHOLDER = re.compile(r"\{([A-Za-z_][A-Za-z0-9_.]*)\}")
+# Accept arbitrary placeholder content (anything but `{` or `}`). Languages
+# like Python and JS evaluate the expression inside the placeholder natively,
+# so users can write `f"{x + 1}"` or `f"{count(items)}"` and have it work.
+_FSTRING_PLACEHOLDER = re.compile(r"\{([^{}]+)\}")
 
 
 def _parse_fstring(content: str, line: int, col: int) -> "FString":

@@ -1,0 +1,22 @@
+# def with positional + default args, return, recursion, multi-return.
+def double x
+  return x * 2
+
+def scale x factor=2
+  return x * factor
+
+def fact n
+  if n <= 1
+    return 1
+  return n * fact(n - 1)
+
+def minmax xs
+  return [min(*xs), max(*xs)]
+
+p double(5)             # 10
+p scale(5)              # 10  (default factor=2)
+p scale(5, 4)           # 20
+p fact(6)               # 720
+
+lo, hi = minmax([3, 1, 4, 1, 5, 9, 2, 6])
+p f"range: {lo}..{hi}"

@@ -1,0 +1,15 @@
+# try / catch with named error + chained safe access.
+try
+  read "/no/such/file.txt" -> raw
+  p raw[0..10]
+catch e
+  p f"failed to read: {e}"
+
+# Optional chaining + null-coalescing for safe lookups.
+config = {db: {host: "localhost"}}
+host = config?.db?.host ?? "127.0.0.1"
+p f"host = {host}"
+
+# Missing key path returns None / fallback.
+missing = config?.cache?.url ?? "unset"
+p f"cache = {missing}"
