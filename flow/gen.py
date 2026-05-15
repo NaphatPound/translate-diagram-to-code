@@ -140,6 +140,7 @@ def generate(
     verbose: bool = False,
     polish: bool = True,
     prompt: str = "full",
+    rounds: int = 1,
 ) -> str:
     """Generate Flow code from a natural-language request, with self-correction.
 
@@ -147,9 +148,19 @@ def generate(
     `prompt` = "minimal" sends only minimal.md (~1.7K chars), useful for
     tiny LLMs whose context window can't hold the long version.
 
-    When `polish` is True (default), after the LLM produces valid code we run
+    `rounds` (default 1) controls best-of-N sampling. With rounds > 1, we
+    run the full generate-and-validate loop N times and return the SHORTEST
+    valid candidate. Useful for non-deterministic LLMs where output quality
+    varies.
+
+    When `polish` is True (default), after each successful candidate we run
     `flow.shrink` (deterministic) to compact the output.
     """
+    if rounds > 1:
+        return _generate_best_of_n(
+            request, cfg=cfg, retries=retries, verbose=verbose,
+            polish=polish, prompt=prompt, rounds=rounds,
+        )
     cfg = cfg or LLMConfig()
     messages = _build_messages(request, prompt=prompt)
 
@@ -209,6 +220,44 @@ def generate(
         return code
 
 
+def _generate_best_of_n(
+    request: str,
+    cfg: Optional[LLMConfig],
+    retries: int,
+    verbose: bool,
+    polish: bool,
+    prompt: str,
+    rounds: int,
+) -> str:
+    """Run `generate()` N times and return the shortest valid candidate."""
+    candidates: list = []
+    last_error: Optional[str] = None
+    for r in range(1, rounds + 1):
+        if verbose:
+            print(f"--- round {r}/{rounds} ---", file=sys.stderr)
+        try:
+            out = generate(
+                request, cfg=cfg, retries=retries, verbose=verbose,
+                polish=polish, prompt=prompt, rounds=1,
+            )
+            candidates.append(out)
+        except LLMError as e:
+            last_error = str(e)
+            if verbose:
+                print(f"round {r} failed: {e}", file=sys.stderr)
+    if not candidates:
+        raise LLMError(
+            f"all {rounds} rounds failed.\nLast error: {last_error}"
+        )
+    # Pick the shortest valid candidate (lexicographic tiebreaker for determinism).
+    best = min(candidates, key=lambda c: (len(c), c))
+    if verbose:
+        sizes = sorted(len(c) for c in candidates)
+        print(f"--- picked best-of-{len(candidates)}: {len(best)} chars "
+              f"(sizes: {sizes}) ---", file=sys.stderr)
+    return best
+
+
 # ---------- CLI integration ----------
 
 
@@ -231,6 +280,7 @@ def cli_main(args) -> None:
             verbose=args.verbose,
             polish=not getattr(args, "no_lint", False),
             prompt=getattr(args, "prompt", "full"),
+            rounds=getattr(args, "rounds", 1),
         )
     except LLMError as e:
         print(f"ERROR: {e}", file=sys.stderr)
