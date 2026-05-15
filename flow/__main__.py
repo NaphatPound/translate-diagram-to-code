@@ -129,6 +129,40 @@ def cmd_shrink(args):
         sys.stdout.write(out)
 
 
+def cmd_run(args):
+    """Compile and execute the Flow program in one step.
+
+    Currently runnable targets: python (always), js (needs `node`),
+    bash (needs `bash`). Other targets compile but printing the result
+    is delegated to the user (e.g. `flow compile foo.flow --to go`).
+    """
+    import subprocess
+    src = _read(args.file)
+    try:
+        ast = parse(src)
+        out = compile_to(ast, args.to)
+    except (ParseError, CompileError) as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(2)
+    runners = {
+        "python": [sys.executable, "-c", out],
+        "js":     ["node", "-e", out],
+        "bash":   ["bash", "-c", out],
+    }
+    cmd = runners.get(args.to)
+    if cmd is None:
+        print(f"`flow run` can't directly execute {args.to!r}; "
+              f"use `flow compile {args.file} --to {args.to}` and run the output yourself.",
+              file=sys.stderr)
+        sys.exit(2)
+    try:
+        r = subprocess.run(cmd, check=False)
+    except FileNotFoundError:
+        print(f"runtime not found: {cmd[0]}", file=sys.stderr)
+        sys.exit(2)
+    sys.exit(r.returncode)
+
+
 def cmd_stats(args):
     """Show char count, statement breakdown, and shrink potential for a file."""
     from .shrink import shrink_source
@@ -328,6 +362,12 @@ def main():
     pst = sub.add_parser("stats", help="report char count, statement counts, and shrink potential")
     pst.add_argument("file")
     pst.set_defaults(func=cmd_stats)
+
+    pr = sub.add_parser("run", help="compile + execute a Flow program (python / js / bash)")
+    pr.add_argument("file")
+    pr.add_argument("--to", choices=["python", "js", "bash"], default="python",
+                    help="target runtime (default: python)")
+    pr.set_defaults(func=cmd_run)
 
     args = p.parse_args()
     args.func(args)
