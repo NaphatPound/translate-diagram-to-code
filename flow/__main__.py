@@ -296,6 +296,67 @@ def cmd_examples(args):
         sys.stdout.write("\n")
 
 
+def cmd_doc(args):
+    """Print a concise verb reference, generated from the live verb registry.
+
+    Useful for:
+      - LLM context priming (pipe into your prompt)
+      - Human quick-reference when writing Flow by hand
+
+    `--compact` collapses each verb to a single line. Otherwise prints a
+    grouped reference with a short syntax preamble.
+    """
+    from .verbs import VERBS
+    from .parser import VERB_ALIASES
+
+    # Group by category in registration order.
+    by_cat: dict = {}
+    cat_order: list = []
+    for spec in VERBS.values():
+        if spec.category not in by_cat:
+            cat_order.append(spec.category)
+            by_cat[spec.category] = []
+        by_cat[spec.category].append(spec)
+
+    def _sig(spec):
+        parts = []
+        for a, _desc in spec.args.items():
+            parts.append(f"{a}=<{_desc.split(' ')[0] if _desc else a}>")
+        sig = " ".join(parts)
+        if spec.returns:
+            sig = f"{sig} -> name".lstrip()
+        return sig
+
+    if args.compact:
+        for cat in cat_order:
+            for spec in by_cat[cat]:
+                print(f"{spec.name:10} {_sig(spec)}")
+        return
+
+    out = []
+    out.append("# Flow — verb reference (auto-generated)")
+    out.append("")
+    out.append("## Syntax")
+    out.append("  verb arg=value -> name      # verb call")
+    out.append("  name = expr                 # assignment")
+    out.append("  a | b | c                   # pipe (primary arg)")
+    out.append("  if cond / else / end-block by indent")
+    out.append("  each x in xs                # loop")
+    out.append("  def f x                     # function (last bare expr = return)")
+    out.append("  cond ? a : b   a ?? b   a?.b   x..y   *xs")
+    out.append("")
+    out.append("## Aliases")
+    aliases = "  " + "  ".join(f"{k}={v}" for k, v in VERB_ALIASES.items())
+    out.append(aliases)
+    out.append("")
+    for cat in cat_order:
+        out.append(f"## {cat}")
+        for spec in by_cat[cat]:
+            out.append(f"  {spec.name:10} {_sig(spec):42}  {spec.summary}")
+        out.append("")
+    sys.stdout.write("\n".join(out) + "\n")
+
+
 def cmd_render(args):
     """Emit a standalone HTML file that renders this program's blocks.
 
@@ -417,6 +478,11 @@ def main():
     pst = sub.add_parser("stats", help="report char count, statement counts, and shrink potential")
     pst.add_argument("file")
     pst.set_defaults(func=cmd_stats)
+
+    pd = sub.add_parser("doc", help="print a verb reference cheatsheet (auto-generated)")
+    pd.add_argument("--compact", action="store_true",
+                    help="one line per verb, no headings (good for grep/LLM)")
+    pd.set_defaults(func=cmd_doc)
 
     pr = sub.add_parser("run", help="compile + execute a Flow program (python / js / bash)")
     pr.add_argument("file")
