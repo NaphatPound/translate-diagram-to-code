@@ -168,6 +168,30 @@ _v("values", "data", "Values of a dict/object",
    python="{out} = list(({of}).values())",
    js="const {out} = Object.values({of});")
 
+_v("first", "data", "First item of a list (or None if empty)",
+   {"from": "list"},
+   returns=True,
+   python="{out} = ({from})[0] if ({from}) else None",
+   js="const {out} = ({from})[0];")
+
+_v("last", "data", "Last item of a list (or None if empty)",
+   {"from": "list"},
+   returns=True,
+   python="{out} = ({from})[-1] if ({from}) else None",
+   js="const {out} = ({from})[({from}).length - 1];")
+
+_v("flatten", "data", "Flatten one level: [[1,2],[3]] → [1,2,3]",
+   {"from": "list of lists"},
+   returns=True,
+   python="{out} = [_y for _x in ({from}) for _y in _x]",
+   js="const {out} = ({from}).flat();")
+
+_v("zip", "data", "Pair two lists element-wise into a list of [a,b]",
+   {"a": "list", "b": "list"},
+   returns=True,
+   python="{out} = [list(_p) for _p in zip({a}, {b})]",
+   js="const {out} = ({a}).map((v, i) => [v, ({b})[i]]);")
+
 
 # ============================================================
 # math  (green)
@@ -429,6 +453,7 @@ _PRIMARY = {
     "filter": "from", "map": "from", "sort": "from",
     "take": "from", "skip": "from",
     "reverse": "from", "unique": "from",
+    "first": "from", "last": "from", "flatten": "from",
     "keys": "of", "values": "of",
     "count": "of", "join": "from", "split": "text",
     "sum": "of", "avg": "of", "min": "of", "max": "of",

@@ -16,7 +16,8 @@ Output Flow source only. No prose, fences, or commentary.
   `"hello" | upper | p`.
 - Builtin funccalls (1-arg, return a value, no `-> name` needed):
   `count(xs) sum(xs) min(xs) max(xs) avg(xs) sorted(xs) reverse(xs)
-   unique(xs) keys(d) values(d) len(s) abs(n) round(n) str(x) int(x) float(x)`.
+   unique(xs) keys(d) values(d) first(xs) last(xs) flatten(xss)
+   len(s) abs(n) round(n) str(x) int(x) float(x)`.
 - Control: `if cond / else`, `unless`, `while`, `each x in xs`,
   `each k, v in dict`, `repeat N as i`, `break`, `continue`,
   `try / catch e`, `return value`.
@@ -36,6 +37,7 @@ Output Flow source only. No prose, fences, or commentary.
 ## Verbs by category
   io      read write print ask load save
   data    filter map sort take skip count join split reverse unique keys values
+          first last flatten zip
   text    format upper lower trim replace contains
   math    add sub mul div sum avg min max round
   time    now today wait

@@ -1015,12 +1015,18 @@ class _Compiler:
             ("python", "keys"):    "list(({0}).keys())",
             ("python", "values"):  "list(({0}).values())",
             ("python", "avg"):     "(sum({0}) / len({0}))",
+            ("python", "first"):   "(({0})[0] if ({0}) else None)",
+            ("python", "last"):    "(({0})[-1] if ({0}) else None)",
+            ("python", "flatten"): "[_y for _x in ({0}) for _y in _x]",
             ("js",     "reverse"): "[...({0})].reverse()",
             ("js",     "unique"):  "[...new Set({0})]",
             ("js",     "keys"):    "Object.keys({0})",
             ("js",     "values"):  "Object.values({0})",
             ("js",     "sum"):     "({0}).reduce((a,b)=>a+b,0)",
             ("js",     "sorted"):  "[...({0})].sort()",
+            ("js",     "first"):   "({0})[0]",
+            ("js",     "last"):    "({0})[({0}).length - 1]",
+            ("js",     "flatten"): "({0}).flat()",
         }
         args = ", ".join(self._render_value(a) for a in f.args)
         tmpl = VERB_TEMPLATES.get((self.lang, f.name))

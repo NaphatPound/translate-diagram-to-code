@@ -66,6 +66,50 @@ class TestCollectionVerbsJS(unittest.TestCase):
         self.assertIn("Object.values", VERBS["values"].templates["js"])
 
 
+class TestExtraCollectionVerbs(unittest.TestCase):
+    """first / last / flatten / zip — common collection ops."""
+
+    def test_first(self):
+        self.assertEqual(_run_python("[10, 20, 30] | first | p"), "10")
+
+    def test_last(self):
+        self.assertEqual(_run_python("[10, 20, 30] | last | p"), "30")
+
+    def test_first_on_empty_is_none(self):
+        self.assertEqual(_run_python("[] | first | p"), "None")
+
+    def test_last_on_empty_is_none(self):
+        self.assertEqual(_run_python("[] | last | p"), "None")
+
+    def test_flatten(self):
+        self.assertEqual(
+            _run_python("[[1, 2], [3, 4], [5]] | flatten | p"),
+            "[1, 2, 3, 4, 5]",
+        )
+
+    def test_zip(self):
+        out = _run_python(
+            'zip a=[1, 2, 3] b=["a", "b", "c"] -> pairs\n'
+            'p pairs'
+        )
+        self.assertEqual(out, "[[1, 'a'], [2, 'b'], [3, 'c']]")
+
+    def test_first_as_funccall(self):
+        self.assertEqual(_run_python("xs = [10, 20]\np first(xs)"), "10")
+
+    def test_last_as_funccall(self):
+        self.assertEqual(_run_python("xs = [10, 20]\np last(xs)"), "20")
+
+    def test_flatten_as_funccall(self):
+        self.assertEqual(_run_python("p flatten([[1], [2, 3]])"), "[1, 2, 3]")
+
+    def test_flatten_shrinks(self):
+        from flow.shrink import shrink_source
+        out = shrink_source("flatten from=xss -> ys\np ys")
+        self.assertIn("flatten(", out)
+        self.assertNotIn("flatten from=", out)
+
+
 class TestPipeFromLiteral(unittest.TestCase):
     """Any value expression can start a pipe, not just identifiers."""
 

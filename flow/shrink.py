@@ -43,7 +43,7 @@ MATH_TO_OP = {"add": "+", "sub": "-", "mul": "*", "div": "/"}
 # Single-arg verbs that can be rewritten as `out = verb(input)`.
 # Keyed by the input arg name in the verb signature.
 OF_FUNCS = {"count", "sum", "min", "max", "avg", "keys", "values"}
-FROM_FUNCS = {"reverse", "unique"}
+FROM_FUNCS = {"reverse", "unique", "first", "last", "flatten"}
 AGGS = OF_FUNCS  # back-compat alias for callers
 
 # Inverted comparison operators for negation flips (`!(a == b)` → `a != b`).
@@ -59,7 +59,8 @@ INVERTED_CMP = {
 # FuncCalls considered safe to inline (no side effects, deterministic).
 PURE_BUILTINS = {"count", "sum", "min", "max", "abs", "len", "round",
                  "int", "float", "str",
-                 "reverse", "unique", "keys", "values", "avg", "sorted"}
+                 "reverse", "unique", "keys", "values", "avg", "sorted",
+                 "first", "last", "flatten"}
 
 
 def shrink_source(src: str) -> str:
