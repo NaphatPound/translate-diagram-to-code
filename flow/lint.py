@@ -23,6 +23,7 @@ from . import parse, ParseError
 from .parser import (
     Program, Call, AssignStmt, MultiAssignStmt, IfStmt, EachStmt, RepeatStmt,
     WhenStmt, DefStmt, ReturnStmt, BreakStmt, ContinueStmt, TryStmt, WhileStmt, ExprStmt,
+    MatchStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, ListLit, DictLit,
     Ternary, Range, FString, MethodCall, IndexAccess, Spread,
 )
@@ -94,6 +95,11 @@ def _check_unused_vars(body: list, out: List[LintWarning]) -> None:
             elif isinstance(s, DefStmt):
                 _check_unused_params(s, out)
                 walk(s.body)
+            elif isinstance(s, MatchStmt):
+                for _pat, case_body in s.cases:
+                    walk(case_body)
+                if s.else_body:
+                    walk(s.else_body)
     walk(body)
 
 
@@ -192,6 +198,13 @@ def _count_all_names(body) -> dict:
                     in_value(s.value)
             elif isinstance(s, ExprStmt):
                 in_value(s.value)
+            elif isinstance(s, MatchStmt):
+                in_value(s.value)
+                for pat, case_body in s.cases:
+                    in_value(pat)
+                    walk(case_body)
+                if s.else_body:
+                    walk(s.else_body)
     walk(body)
     return counts
 
@@ -219,6 +232,11 @@ def _check_dead_code(body: list, out: List[LintWarning]) -> None:
         elif isinstance(stmt, TryStmt):
             _check_dead_code(stmt.try_body, out)
             _check_dead_code(stmt.catch_body, out)
+        elif isinstance(stmt, MatchStmt):
+            for _pat, case_body in stmt.cases:
+                _check_dead_code(case_body, out)
+            if stmt.else_body:
+                _check_dead_code(stmt.else_body, out)
 
 
 # ---------- traversal ----------
@@ -243,6 +261,13 @@ def _walk(stmt, out: List[LintWarning]) -> None:
         _check_def(stmt, out)
         for s in stmt.body:
             _walk(s, out)
+    elif isinstance(stmt, MatchStmt):
+        for _pat, case_body in stmt.cases:
+            for s in case_body:
+                _walk(s, out)
+        if stmt.else_body:
+            for s in stmt.else_body:
+                _walk(s, out)
 
 
 def _check_def(stmt: DefStmt, out: List[LintWarning]) -> None:

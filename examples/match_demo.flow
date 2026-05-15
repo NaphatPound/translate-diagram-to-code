@@ -1,0 +1,30 @@
+# match / case with literal patterns. Each arm's last bare expression
+# is implicit-returned when the match is the def body's last statement.
+def grade score
+  match score
+    case 100
+      "perfect"
+    case 0
+      "zero"
+    case 50
+      "half"
+    else
+      f"score: {score}"
+
+def status_label code
+  match code
+    case "ok"
+      "request succeeded"
+    case "err"
+      "request failed"
+    case "timeout"
+      "no response"
+    else
+      f"unknown code: {code}"
+
+p grade(100)
+p grade(50)
+p grade(7)
+p status_label("ok")
+p status_label("timeout")
+p status_label("nope")

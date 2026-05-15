@@ -145,6 +145,27 @@ p host
 
 ---
 
+USER: classify a status code as a human label
+
+A:
+```
+def label code
+  match code
+    case "ok"
+      "succeeded"
+    case "err"
+      "failed"
+    case "timeout"
+      "no response"
+    else
+      f"unknown: {code}"
+
+p label("ok")
+p label("unknown_x")
+```
+
+---
+
 ## Anti-patterns to avoid
 
 - ❌ `let x = ...`            ✅ `x = ...`
