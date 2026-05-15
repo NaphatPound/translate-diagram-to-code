@@ -47,6 +47,20 @@ class CompileError(Exception):
 SUPPORTED_LANGS = ("python", "js", "go", "rust", "bash")
 
 
+import re as _re
+_FIXED_FLOAT_RE = _re.compile(r"\.(\d+)f$")
+
+
+def _iter_fstring_parts(fs):
+    """Yield (kind, payload, fmt) for each part, padding to 3-tuples so we
+    tolerate parts written before the fmt-spec extension."""
+    for part in fs.parts:
+        if len(part) >= 3:
+            yield part[0], part[1], part[2]
+        else:
+            yield part[0], part[1], ""
+
+
 # ============================================================
 # Entry point
 # ============================================================
@@ -1195,49 +1209,59 @@ class _Compiler:
         access) apply consistently with the rest of the program."""
         if self.lang == "python":
             buf = []
-            for kind, payload in fs.parts:
+            for kind, payload, fmt in _iter_fstring_parts(fs):
                 if kind == "text":
                     buf.append(_escape_for_fstring(payload, "python"))
                 else:
-                    buf.append("{" + self._render_value(payload) + "}")
+                    expr = self._render_value(payload)
+                    buf.append("{" + expr + (":" + fmt if fmt else "") + "}")
             return 'f"' + "".join(buf) + '"'
         if self.lang == "js":
             buf = []
-            for kind, payload in fs.parts:
+            for kind, payload, fmt in _iter_fstring_parts(fs):
                 if kind == "text":
                     buf.append(_escape_for_fstring(payload, "js"))
                 else:
-                    buf.append("${" + self._render_value(payload) + "}")
+                    expr = self._render_value(payload)
+                    # Best-effort: `.Nf` → `.toFixed(N)`. Other specs ignored.
+                    m_fp = _FIXED_FLOAT_RE.match(fmt) if fmt else None
+                    if m_fp:
+                        buf.append("${(" + expr + ").toFixed(" + m_fp.group(1) + ")}")
+                    else:
+                        buf.append("${" + expr + "}")
             return "`" + "".join(buf) + "`"
         if self.lang == "go":
-            fmt = ""
+            fmt_str = ""
             args = []
-            for kind, payload in fs.parts:
+            for kind, payload, fmt in _iter_fstring_parts(fs):
                 if kind == "text":
-                    fmt += payload.replace("%", "%%")
+                    fmt_str += payload.replace("%", "%%")
                 else:
-                    fmt += "%v"
+                    # `.2f` → `%.2f`, else `%v`.
+                    m_fp = _FIXED_FLOAT_RE.match(fmt) if fmt else None
+                    fmt_str += f"%.{m_fp.group(1)}f" if m_fp else "%v"
                     args.append(self._render_value(payload))
-            quoted = json.dumps(fmt, ensure_ascii=False)
+            quoted = json.dumps(fmt_str, ensure_ascii=False)
             if args:
                 return f"fmt.Sprintf({quoted}, {', '.join(args)})"
             return quoted
         if self.lang == "rust":
-            fmt = ""
+            fmt_str = ""
             args = []
-            for kind, payload in fs.parts:
+            for kind, payload, fmt in _iter_fstring_parts(fs):
                 if kind == "text":
-                    fmt += payload.replace("{", "{{").replace("}", "}}")
+                    fmt_str += payload.replace("{", "{{").replace("}", "}}")
                 else:
-                    fmt += "{}"
+                    # Rust uses the same `:.Nf` syntax — pass through.
+                    fmt_str += "{:" + fmt + "}" if fmt else "{}"
                     args.append(self._render_value(payload))
-            quoted = json.dumps(fmt, ensure_ascii=False)
+            quoted = json.dumps(fmt_str, ensure_ascii=False)
             if args:
                 return f"format!({quoted}, {', '.join(args)})"
             return quoted
         if self.lang == "bash":
             buf = []
-            for kind, payload in fs.parts:
+            for kind, payload, fmt in _iter_fstring_parts(fs):
                 if kind == "text":
                     buf.append(payload)
                 else:

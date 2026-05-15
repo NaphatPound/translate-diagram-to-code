@@ -242,11 +242,12 @@ def _simplify_value(v):
         return Range(_simplify_value(v.start), _simplify_value(v.end))
     if isinstance(v, FString):
         new_parts = []
-        for kind, payload in v.parts:
-            if kind == "expr":
-                new_parts.append(("expr", _simplify_value(payload)))
+        for part in v.parts:
+            fmt = part[2] if len(part) > 2 else ""
+            if part[0] == "expr":
+                new_parts.append(("expr", _simplify_value(part[1]), fmt))
             else:
-                new_parts.append((kind, payload))
+                new_parts.append((part[0], part[1], fmt))
         return FString(parts=new_parts)
     return v
 
@@ -654,9 +655,9 @@ def _count_in_value(value, counts) -> None:
         for _, v in value.entries:
             _count_in_value(v, counts)
     elif isinstance(value, FString):
-        for kind, payload in value.parts:
-            if kind == "expr":
-                _count_in_value(payload, counts)
+        for part in value.parts:
+            if part[0] == "expr":
+                _count_in_value(part[1], counts)
     elif isinstance(value, MethodCall):
         _count_in_value(value.receiver, counts)
         if value.args is not None:
@@ -744,11 +745,14 @@ def _replace_value(value, inlines, _expanding=None):
     if isinstance(value, FString):
         # `expr` parts are full Value AST nodes; recurse to substitute inlinables.
         new_parts = []
-        for kind, payload in value.parts:
-            if kind == "expr":
-                new_parts.append(("expr", _replace_value(payload, inlines, _expanding)))
+        for part in value.parts:
+            fmt = part[2] if len(part) > 2 else ""
+            if part[0] == "expr":
+                new_parts.append(("expr",
+                                  _replace_value(part[1], inlines, _expanding),
+                                  fmt))
             else:
-                new_parts.append((kind, payload))
+                new_parts.append((part[0], part[1], fmt))
         return FString(parts=new_parts)
     if isinstance(value, MethodCall):
         new_args = (None if value.args is None

@@ -1539,26 +1539,28 @@ _FSTRING_PLACEHOLDER = re.compile(r"\{([^{}]+)\}")
 def _parse_fstring(content: str, line: int, col: int) -> "FString":
     """Split an f-string body into text segments and parsed-expression segments.
 
-    Returns FString.parts as alternating tuples:
-      ("text", str)            literal text fragment
-      ("expr", Value)          parsed Flow expression — re-rendered per target
+    Returns FString.parts as 3-tuples:
+      ("text", str, "")              literal text fragment
+      ("expr", Value, fmt_spec_str)  parsed Flow expression + optional format spec
 
-    `\\{` is intentionally not honored: f-string placeholders are delimited
-    by `{` … `}` and the inner content is treated as a Flow expression.
+    The format spec is the part after a top-level `:` in the placeholder
+    (e.g. `.2f` in `{x:.2f}`). Nested `:` inside parens/brackets/braces
+    or after a `?` (ternary) are not treated as format-spec separators.
     """
-    parts: List[Tuple[str, object]] = []
+    parts: List[Tuple[str, object, str]] = []
     pos = 0
     while pos < len(content):
         m = _FSTRING_PLACEHOLDER.search(content, pos)
         if not m:
-            parts.append(("text", content[pos:]))
+            parts.append(("text", content[pos:], ""))
             break
         if m.start() > pos:
-            parts.append(("text", content[pos:m.start()]))
+            parts.append(("text", content[pos:m.start()], ""))
         placeholder = m.group(1)
-        # Tokenize + parse the placeholder as a Flow expression.
+        expr_str, fmt_spec = _split_fstring_format_spec(placeholder)
+        # Tokenize + parse the expr part as a Flow expression.
         try:
-            sub_tokens = _tokenize_line(placeholder, line)
+            sub_tokens = _tokenize_line(expr_str, line)
         except ParseError as e:
             raise ParseError(
                 f"invalid f-string placeholder {{{placeholder}}}: {e.msg}",
@@ -1573,10 +1575,46 @@ def _parse_fstring(content: str, line: int, col: int) -> "FString":
                 f"unexpected token {sub_tokens[end].value!r} in f-string placeholder",
                 sub_tokens[end].line, sub_tokens[end].col,
             )
-        parts.append(("expr", expr))
+        parts.append(("expr", expr, fmt_spec))
         pos = m.end()
     parts = [p for p in parts if not (p[0] == "text" and p[1] == "")]
     return FString(parts=parts)
+
+
+def _split_fstring_format_spec(content: str) -> Tuple[str, str]:
+    """Split `expr:fmt` at the first top-level `:` not inside [],(),{} or
+    consumed by a ternary `?:`. Returns (expr_str, fmt_spec) — fmt_spec is
+    an empty string when no spec is present."""
+    depth = 0
+    q_pending = 0   # `?` seen at depth 0 awaiting its matching `:`
+    in_str = False
+    str_quote = ""
+    i = 0
+    while i < len(content):
+        ch = content[i]
+        if in_str:
+            if ch == "\\" and i + 1 < len(content):
+                i += 2
+                continue
+            if ch == str_quote:
+                in_str = False
+        else:
+            if ch in '"\'':
+                in_str = True
+                str_quote = ch
+            elif ch in "([{":
+                depth += 1
+            elif ch in ")]}":
+                depth -= 1
+            elif ch == "?" and depth == 0:
+                q_pending += 1
+            elif ch == ":" and depth == 0:
+                if q_pending > 0:
+                    q_pending -= 1  # this `:` belongs to a ternary
+                else:
+                    return content[:i], content[i + 1:]
+        i += 1
+    return content, ""
 
 
 # ============================================================

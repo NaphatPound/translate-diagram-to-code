@@ -24,15 +24,16 @@ class TestFStringParse(unittest.TestCase):
         ast = parse('p f"hello"')
         v = ast.body[0].args[0].value
         self.assertIsInstance(v, FString)
-        self.assertEqual(v.parts, [("text", "hello")])
+        # Parts are 3-tuples (kind, payload, fmt_spec).
+        self.assertEqual(v.parts, [("text", "hello", "")])
 
     def test_single_placeholder(self):
         ast = parse('p f"hi {name}"')
         v = ast.body[0].args[0].value
-        # New shape: placeholder is a parsed Flow expression (Value).
         self.assertEqual(len(v.parts), 2)
-        self.assertEqual(v.parts[0], ("text", "hi "))
+        self.assertEqual(v.parts[0], ("text", "hi ", ""))
         self.assertEqual(v.parts[1][0], "expr")
+        self.assertEqual(v.parts[1][2], "")  # no format spec
 
     def test_multiple_placeholders(self):
         ast = parse('p f"hi {a}, age {b}!"')

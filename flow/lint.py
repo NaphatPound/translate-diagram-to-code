@@ -164,9 +164,9 @@ def _count_all_names(body) -> dict:
         elif isinstance(v, Range):
             in_value(v.start); in_value(v.end)
         elif isinstance(v, FString):
-            for kind, payload in v.parts:
-                if kind == "expr":
-                    in_value(payload)
+            for part in v.parts:
+                if part[0] == "expr":
+                    in_value(part[1])
         elif isinstance(v, MethodCall):
             in_value(v.receiver)
             if v.args is not None:
