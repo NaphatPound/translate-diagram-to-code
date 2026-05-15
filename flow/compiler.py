@@ -21,7 +21,7 @@ from typing import List, Set
 from .parser import (
     Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhenStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, Arg,
-    ListLit, DictLit, Ternary, Range, FString, MethodCall,
+    ListLit, DictLit, Ternary, Range, FString, MethodCall, IndexAccess,
 )
 
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -536,6 +536,13 @@ class _Compiler:
                 return f"{rec}.{v.method}"
             args = ", ".join(self._render_value(a) for a in v.args)
             return f"{rec}.{v.method}({args})"
+        if isinstance(v, IndexAccess):
+            rec = self._render_value(v.receiver)
+            idx = self._render_value(v.index)
+            if self.lang == "bash":
+                # Bash: arrays use ${arr[idx]}; assoc arrays similar. Best-effort.
+                return f"${{{rec.lstrip('$')}[{idx}]}}"
+            return f"{rec}[{idx}]"
         if isinstance(v, Range):
             s = self._render_value(v.start)
             e = self._render_value(v.end)

@@ -33,7 +33,7 @@ from . import parse
 from .parser import (
     Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhenStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, ListLit, DictLit,
-    Ternary, Range, FString, MethodCall, Arg,
+    Ternary, Range, FString, MethodCall, IndexAccess, Arg,
 )
 from .formatter import format_source
 
@@ -271,6 +271,9 @@ def _count_in_value(value, counts) -> None:
         if value.args is not None:
             for a in value.args:
                 _count_in_value(a, counts)
+    elif isinstance(value, IndexAccess):
+        _count_in_value(value.receiver, counts)
+        _count_in_value(value.index, counts)
 
 
 def _replace_and_drop(body, inlines):
@@ -350,5 +353,10 @@ def _replace_value(value, inlines, _expanding=None):
             receiver=_replace_value(value.receiver, inlines, _expanding),
             method=value.method,
             args=new_args,
+        )
+    if isinstance(value, IndexAccess):
+        return IndexAccess(
+            receiver=_replace_value(value.receiver, inlines, _expanding),
+            index=_replace_value(value.index, inlines, _expanding),
         )
     return value

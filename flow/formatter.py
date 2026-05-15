@@ -19,7 +19,7 @@ from typing import List
 from .parser import (
     Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhenStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, Arg,
-    ListLit, DictLit, Ternary, Range, FString, MethodCall,
+    ListLit, DictLit, Ternary, Range, FString, MethodCall, IndexAccess,
 )
 
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -219,6 +219,9 @@ def _count_in_value(value, counts):
         if value.args is not None:
             for a in value.args:
                 _count_in_value(a, counts)
+    elif isinstance(value, IndexAccess):
+        _count_in_value(value.receiver, counts)
+        _count_in_value(value.index, counts)
 
 
 # ---------- calls ----------
@@ -328,4 +331,6 @@ def _fmt_value(v) -> str:
             return f"{rec}.{v.method}"
         args = ", ".join(_fmt_value(a) for a in v.args)
         return f"{rec}.{v.method}({args})"
+    if isinstance(v, IndexAccess):
+        return f"{_fmt_value(v.receiver)}[{_fmt_value(v.index)}]"
     raise ValueError(f"unknown value type: {type(v).__name__}")

@@ -27,7 +27,7 @@ from typing import List, Optional, Union, Tuple, Any
 # AST
 # ============================================================
 
-Value = Union["StringLit", "NumberLit", "BoolLit", "Name", "FuncCall", "BinOp", "ListLit", "DictLit", "Ternary", "Range", "FString", "MethodCall"]
+Value = Union["StringLit", "NumberLit", "BoolLit", "Name", "FuncCall", "BinOp", "ListLit", "DictLit", "Ternary", "Range", "FString", "MethodCall", "IndexAccess"]
 Stmt = Union["Call", "AssignStmt", "IfStmt", "EachStmt", "RepeatStmt", "WhenStmt"]
 
 
@@ -120,6 +120,15 @@ class MethodCall:
     method: str
     args: Optional[List[Value]]
     kind: str = "methodcall"
+
+
+@dataclass
+class IndexAccess:
+    """`receiver[index]` — postfix bracket access. Works on lists, dicts,
+    strings, anywhere the target language supports `[]`."""
+    receiver: Value
+    index: Value
+    kind: str = "index"
 
 
 @dataclass
@@ -229,6 +238,8 @@ TOKEN_SPEC = [
     ("ARROW", r"->"),
     ("CMP", r">=|<=|==|!="),
     ("DOTDOT", r"\.\."),
+    ("OROP", r"\|\|"),
+    ("ANDOP", r"&&"),
     ("PIPE", r"\|"),
     ("QMARK", r"\?"),
     ("OP", r"[=<>+\-*/]"),
@@ -492,9 +503,10 @@ class _Parser:
 
         # Optional positional value first: `print "hi"` ≡ `print value="hi"`.
         # Only consume if the next token is a value-starter that is NOT an
-        # `ident =` pair (which would be a named arg).
+        # `ident =` pair (which would be a named arg). Use the full expression
+        # parser so arithmetic and method-chains work without explicit parens.
         if i < len(toks) and self._looks_like_positional(toks, i):
-            value, i = self._parse_value(toks, i, line_no)
+            value, i = self._parse_expr(toks, i, line_no)
             args.append(Arg("<pos>", value))
 
         # Named args + optional ->name; stop at PIPE or postfix-if.
@@ -531,7 +543,7 @@ class _Parser:
                     t.line, t.col,
                 )
             i += 2
-            value, i = self._parse_value(toks, i, line_no)
+            value, i = self._parse_expr(toks, i, line_no)
             args.append(Arg(arg_name, value))
 
         return Call(verb=verb, args=args, out=out, line=line_no), i
@@ -565,8 +577,21 @@ class _Parser:
             end, i = self._parse_primary(toks, i, line_no)
             v = Range(start=v, end=end)
             return v, i
-        # Postfix `.name` / `.name(args)` chain.
-        while i < len(toks) and toks[i].kind == "DOT":
+        # Postfix chain: `.name` / `.name(args)` / `[expr]`.
+        while i < len(toks) and toks[i].kind in ("DOT", "LBRACK"):
+            if toks[i].kind == "LBRACK":
+                i += 1
+                idx_expr, i = self._parse_expr(toks, i, line_no)
+                if i >= len(toks) or toks[i].kind != "RBRACK":
+                    raise ParseError(
+                        "expected ']' to close index access",
+                        toks[i].line if i < len(toks) else line_no,
+                        toks[i].col if i < len(toks) else 1,
+                    )
+                i += 1
+                v = IndexAccess(receiver=v, index=idx_expr)
+                continue
+            # DOT
             i += 1
             if i >= len(toks) or toks[i].kind != "WORD" or not _is_ident(toks[i].value):
                 raise ParseError(
@@ -584,7 +609,7 @@ class _Parser:
                     i += 1
                 else:
                     while True:
-                        arg_v, i = self._parse_value(toks, i, line_no)
+                        arg_v, i = self._parse_expr(toks, i, line_no)
                         m_args.append(arg_v)
                         if i >= len(toks):
                             raise ParseError("expected ')' to close method call",
@@ -657,7 +682,7 @@ class _Parser:
         if i < len(toks) and toks[i].kind == "RBRACK":
             return ListLit(items), i + 1
         while True:
-            val, i = self._parse_value(toks, i, line_no)
+            val, i = self._parse_expr(toks, i, line_no)
             items.append(val)
             if i >= len(toks):
                 raise ParseError("expected ']' to close list", line_no, 1)
@@ -693,7 +718,7 @@ class _Parser:
                                  toks[i].line if i < len(toks) else kt.line,
                                  toks[i].col  if i < len(toks) else kt.col)
             i += 1
-            val, i = self._parse_value(toks, i, line_no)
+            val, i = self._parse_expr(toks, i, line_no)
             entries.append((key, val))
             if i >= len(toks):
                 raise ParseError("expected '}' to close dict", line_no, 1)
@@ -715,7 +740,7 @@ class _Parser:
         if i < len(toks) and toks[i].kind == "RPAREN":
             return FuncCall(name, args), i + 1
         while True:
-            val, i = self._parse_value(toks, i, line_no)
+            val, i = self._parse_expr(toks, i, line_no)
             args.append(val)
             if i >= len(toks):
                 raise ParseError("expected ')' to close function call", line_no, 1)
@@ -727,19 +752,35 @@ class _Parser:
             raise ParseError(f"expected ',' or ')' in function call, got {toks[i].value!r}",
                              toks[i].line, toks[i].col)
 
-    def _parse_expr(self, toks: List[Token], i: int, line_no: int) -> Tuple[Value, int]:
-        """Parse a (possibly binary, possibly ternary) expression."""
+    def _parse_expr(self, toks: List[Token], i: int, line_no: int,
+                    min_prec: int = 0) -> Tuple[Value, int]:
+        """Precedence-climbing expression parser.
+
+        Precedence (low → high):
+          or/||          : 1
+          and/&&         : 2
+          == != < > <= >=: 3
+          + -            : 4
+          * /            : 5
+        Ternary `?:` sits at precedence 0 (looser than everything else).
+        """
         left, i = self._parse_value(toks, i, line_no)
-        while i < len(toks) and toks[i].kind in ("CMP", "OP", "KW_AND", "KW_OR"):
+        while i < len(toks):
             op_tok = toks[i]
-            if op_tok.kind == "OP" and op_tok.value == "=":
-                raise ParseError("did you mean '==' for comparison?", op_tok.line, op_tok.col)
-            op = op_tok.value if op_tok.kind in ("CMP", "OP") else op_tok.value.lower()
+            op = _op_from_token(op_tok)
+            if op is None:
+                break
+            if op == "=":
+                raise ParseError("did you mean '==' for comparison?",
+                                 op_tok.line, op_tok.col)
+            prec = _OP_PRECEDENCE.get(op)
+            if prec is None or prec < min_prec:
+                break
             i += 1
-            right, i = self._parse_value(toks, i, line_no)
+            right, i = self._parse_expr(toks, i, line_no, prec + 1)
             left = BinOp(op, left, right)
-        # Ternary: <expr> ? <then> : <else>
-        if i < len(toks) and toks[i].kind == "QMARK":
+        # Ternary is the loosest binder; only consume one level at min_prec 0.
+        if min_prec <= 0 and i < len(toks) and toks[i].kind == "QMARK":
             i += 1
             then_val, i = self._parse_expr(toks, i, line_no)
             if i >= len(toks) or toks[i].kind != "COLON":
@@ -787,7 +828,7 @@ class _Parser:
             raise ParseError(f"expected 'in' after each-variable, got {toks[2].value!r}",
                              toks[2].line, toks[2].col)
         var = toks[1].value
-        iterable, i = self._parse_value(toks, 3, line.line_no)
+        iterable, i = self._parse_expr(toks, 3, line.line_no)
         if i != len(toks):
             raise ParseError(f"unexpected token after iterable: {toks[i].value!r}",
                              toks[i].line, toks[i].col)
@@ -800,7 +841,7 @@ class _Parser:
         toks = line.tokens
         if len(toks) < 2:
             raise ParseError("'repeat' needs a count: repeat <number-or-name>", line.line_no, 1)
-        count, i = self._parse_value(toks, 1, line.line_no)
+        count, i = self._parse_expr(toks, 1, line.line_no)
         var: Optional[str] = None
         if i < len(toks) and toks[i].kind == "KW_AS":
             if i + 1 >= len(toks):
@@ -831,7 +872,7 @@ class _Parser:
         args: List[Value] = []
         i = 2
         while i < len(toks):
-            val, i = self._parse_value(toks, i, line.line_no)
+            val, i = self._parse_expr(toks, i, line.line_no)
             args.append(val)
         self.idx += 1
         body, _ = self._parse_block(base_indent + 1)
@@ -844,6 +885,28 @@ class _Parser:
 
 
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+_OP_PRECEDENCE = {
+    "or":  1, "and": 2,
+    "==": 3, "!=": 3, "<":  3, ">":  3, "<=": 3, ">=": 3,
+    "+":  4, "-":  4,
+    "*":  5, "/":  5,
+}
+
+
+def _op_from_token(tok: "Token") -> Optional[str]:
+    """Return the canonical operator name for an operator-like token, or None."""
+    if tok.kind == "ANDOP":
+        return "and"
+    if tok.kind == "OROP":
+        return "or"
+    if tok.kind == "KW_AND":
+        return "and"
+    if tok.kind == "KW_OR":
+        return "or"
+    if tok.kind in ("CMP", "OP"):
+        return tok.value
+    return None
 
 
 def _is_ident(s: str) -> bool:

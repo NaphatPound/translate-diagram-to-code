@@ -86,6 +86,17 @@ follow these rules exactly. The parser is strict; deviations will fail.
         r "log.txt" -> log if verbose
     Works for any statement (call, pipeline, etc.) — wraps the WHOLE
     statement in an `if` with no else branch.
+22. **Index access** `arr[i]`, `d["k"]` — postfix bracket on any value.
+    Works in chains: `s.split(",")[0]`, `xs[i].upper()`.
+23. **Boolean shortcuts** `&&` / `||` — synonyms for `and` / `or`. Equivalent:
+        if x > 0 && y > 0
+        if x < 0 || y < 0
+24. **Operator precedence** is standard: `*` `/` > `+` `-` > `< > == != <= >=`
+    > `and` `&&` > `or` `||` > ternary. Arithmetic and comparisons compose
+    naturally — no need to parenthesize `x > 0 and y > 0`. Expressions are
+    now permitted as positional values and named-arg values without parens.
+25. **String concat** uses `+`: `"hello, " + name`. Slightly shorter than
+    `f"hello, {name}"` for one-variable interpolation.
 
 ## Verb categories (you may only use these verbs)
 
