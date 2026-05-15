@@ -27,7 +27,7 @@ from typing import List, Optional, Union, Tuple, Any
 # AST
 # ============================================================
 
-Value = Union["StringLit", "NumberLit", "BoolLit", "Name", "FuncCall", "BinOp", "UnaryOp", "ListLit", "DictLit", "Ternary", "Range", "FString", "MethodCall", "IndexAccess"]
+Value = Union["StringLit", "NumberLit", "BoolLit", "Name", "FuncCall", "BinOp", "UnaryOp", "ListLit", "DictLit", "Ternary", "Range", "FString", "MethodCall", "IndexAccess", "Spread"]
 Stmt = Union["Call", "AssignStmt", "IfStmt", "EachStmt", "RepeatStmt", "WhileStmt", "WhenStmt", "TryStmt", "BreakStmt", "ContinueStmt", "DefStmt", "ReturnStmt", "ExprStmt"]
 
 
@@ -78,6 +78,14 @@ class UnaryOp:
     op: str
     value: Value
     kind: str = "unary"
+
+
+@dataclass
+class Spread:
+    """`*xs` inside a list literal or funccall args: expands the iterable
+    into the surrounding collection / argument list."""
+    value: Value
+    kind: str = "spread"
 
 
 @dataclass
@@ -231,9 +239,11 @@ class ContinueStmt:
 
 @dataclass
 class DefStmt:
-    """User-defined function: `def name p1 p2 ... ` + indented body."""
+    """User-defined function: `def name p1 p2 p3=default ...` + indented body.
+    Each entry in params is (name, default) where default is None for
+    required-positional params."""
     name: str
-    params: List[str]
+    params: List[Tuple[str, Optional[Value]]]
     body: List[Stmt]
     line: int
     kind: str = "def"
@@ -757,7 +767,7 @@ class _Parser:
                     i += 1
                 else:
                     while True:
-                        arg_v, i = self._parse_expr(toks, i, line_no)
+                        arg_v, i = self._parse_value_maybe_spread(toks, i, line_no)
                         m_args.append(arg_v)
                         if i >= len(toks):
                             raise ParseError("expected ')' to close method call",
@@ -834,7 +844,7 @@ class _Parser:
         if i < len(toks) and toks[i].kind == "RBRACK":
             return ListLit(items), i + 1
         while True:
-            val, i = self._parse_expr(toks, i, line_no)
+            val, i = self._parse_value_maybe_spread(toks, i, line_no)
             items.append(val)
             if i >= len(toks):
                 raise ParseError("expected ']' to close list", line_no, 1)
@@ -845,6 +855,15 @@ class _Parser:
                 return ListLit(items), i + 1
             raise ParseError(f"expected ',' or ']' in list, got {toks[i].value!r}",
                              toks[i].line, toks[i].col)
+
+    def _parse_value_maybe_spread(self, toks: List[Token], i: int, line_no: int) -> Tuple[Value, int]:
+        """Parse a value, with optional leading `*` for spread. Used inside
+        list literals and funccall args."""
+        if i < len(toks) and toks[i].kind == "OP" and toks[i].value == "*":
+            i += 1
+            inner, i = self._parse_expr(toks, i, line_no)
+            return Spread(value=inner), i
+        return self._parse_expr(toks, i, line_no)
 
     def _parse_dict(self, toks: List[Token], i: int, line_no: int) -> Tuple[DictLit, int]:
         i += 1  # consume '{'
@@ -892,7 +911,7 @@ class _Parser:
         if i < len(toks) and toks[i].kind == "RPAREN":
             return FuncCall(name, args), i + 1
         while True:
-            val, i = self._parse_expr(toks, i, line_no)
+            val, i = self._parse_value_maybe_spread(toks, i, line_no)
             args.append(val)
             if i >= len(toks):
                 raise ParseError("expected ')' to close function call", line_no, 1)
@@ -1037,14 +1056,24 @@ class _Parser:
                 name_tok.line, name_tok.col,
             )
         name = name_tok.value
-        params: List[str] = []
-        for t in toks[2:]:
+        params: List[Tuple[str, Optional[Value]]] = []
+        i = 2
+        while i < len(toks):
+            t = toks[i]
             if t.kind != "WORD" or not _is_ident(t.value):
                 raise ParseError(
                     f"def param must be a plain identifier (got {t.value!r})",
                     t.line, t.col,
                 )
-            params.append(t.value)
+            pname = t.value
+            i += 1
+            default: Optional[Value] = None
+            # Optional default: `name=expr`. Stop at next param boundary
+            # (a fresh WORD token) or end of line.
+            if i < len(toks) and toks[i].kind == "OP" and toks[i].value == "=":
+                i += 1
+                default, i = self._parse_expr(toks, i, line.line_no)
+            params.append((pname, default))
         self.idx += 1
         body, _ = self._parse_block(base_indent + 1)
         return DefStmt(name=name, params=params, body=body, line=line.line_no)

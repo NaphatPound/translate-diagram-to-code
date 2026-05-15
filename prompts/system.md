@@ -159,6 +159,17 @@ follow these rules exactly. The parser is strict; deviations will fail.
     `f(x)` (no space) is a funccall statement; `f (x)` (with space) is a
     verb-call with a parenthesized positional value. Use `()` to invoke a
     user-defined function.
+35. **Default args** in `def`: `def scale x factor=2`. Defaults appear after
+    required params; the parser accepts any expression as the default.
+        def greet name greeting="hi"
+          p f"{greeting}, {name}"
+        greet("alice")                    # uses default → "hi, alice"
+        greet("alice", "yo")              # → "yo, alice"
+36. **Spread `*xs`** inside list literals and funccall args expands an
+    iterable into the surrounding collection / argument list:
+        combined = [*xs, *ys, 0]
+        biggest = max(*nums)
+    Renders to `*xs` in Python, `...xs` in JS, `xs...` in Go.
 
 ## Verb categories (you may only use these verbs)
 

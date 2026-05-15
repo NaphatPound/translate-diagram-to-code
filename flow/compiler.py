@@ -22,7 +22,7 @@ from .parser import (
     Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhileStmt, WhenStmt, TryStmt,
     BreakStmt, ContinueStmt, DefStmt, ReturnStmt, ExprStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, Arg,
-    ListLit, DictLit, Ternary, Range, FString, MethodCall, IndexAccess,
+    ListLit, DictLit, Ternary, Range, FString, MethodCall, IndexAccess, Spread,
 )
 
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -194,28 +194,43 @@ class _Compiler:
             raise CompileError(f"unknown statement type: {type(stmt).__name__}")
 
     def emit_def(self, stmt: DefStmt) -> None:
-        params_str = ", ".join(stmt.params)
+        # Render `name` or `name=default` per language.
+        def _param_src(name: str, default: Optional[object], lang: str) -> str:
+            if default is None:
+                return name
+            ds = self._render_value(default)
+            if lang in ("python", "js"):
+                return f"{name}={ds}" if lang == "python" else f"{name} = {ds}"
+            # Go/Rust: no defaults; ignore (caller must pass).
+            return name
         if self.lang == "python":
-            self._emit(f"def {stmt.name}({params_str}):")
+            ps = ", ".join(_param_src(n, d, "python") for n, d in stmt.params)
+            self._emit(f"def {stmt.name}({ps}):")
         elif self.lang == "js":
-            self._emit(f"function {stmt.name}({params_str}) {{")
+            ps = ", ".join(_param_src(n, d, "js") for n, d in stmt.params)
+            self._emit(f"function {stmt.name}({ps}) {{")
         elif self.lang == "go":
-            params_typed = ", ".join(f"{p} any" for p in stmt.params)
+            params_typed = ", ".join(f"{n} any" for n, _ in stmt.params)
             self._emit(f"func {stmt.name}({params_typed}) any {{")
         elif self.lang == "rust":
-            params_typed = ", ".join(f"{p}: impl std::fmt::Debug" for p in stmt.params)
+            params_typed = ", ".join(f"{n}: impl std::fmt::Debug" for n, _ in stmt.params)
             self._emit(f"fn {stmt.name}({params_typed}) {{")
         elif self.lang == "bash":
             self._emit(f"{stmt.name}() {{")
-            # Bash positional args are $1, $2, ...; bind each to the param name.
-            for j, p in enumerate(stmt.params, start=1):
+            # Bash positional args are $1, $2, ...; bind each to the param name,
+            # honoring defaults via ${1:-default} syntax.
+            for j, (pn, pd) in enumerate(stmt.params, start=1):
                 self._block_open()
-                self._emit(f"local {p}=\"${j}\"")
+                if pd is None:
+                    self._emit(f"local {pn}=\"${j}\"")
+                else:
+                    ds = self._render_value(pd)
+                    self._emit(f"local {pn}=\"${{{j}:-{ds}}}\"")
                 self.indent -= 1
         # Bring params into scope while we emit the body.
         prev_scope = self.scope.copy()
-        for p in stmt.params:
-            self.scope.add(p)
+        for pn, _ in stmt.params:
+            self.scope.add(pn)
         # Also register the function name so calls to it parse as variable refs
         # rather than string-literal barewords.
         self.scope.add(stmt.name)
@@ -745,6 +760,18 @@ class _Compiler:
                     return f"(! {inner})"
                 return f"(!{inner})"
             raise CompileError(f"unknown unary op {v.op!r}")
+        if isinstance(v, Spread):
+            inner = self._render_value(v.value)
+            if self.lang in ("python", "js"):
+                return f"*{inner}" if self.lang == "python" else f"...{inner}"
+            if self.lang == "go":
+                return f"{inner}..."
+            if self.lang == "rust":
+                # No general spread; emit `inner.iter().copied()` as a hint.
+                return f"{inner}"
+            if self.lang == "bash":
+                return f"\"${{{inner.lstrip('$')}[@]}}\""
+            return inner
         if isinstance(v, Ternary):
             cond = self._render_value(v.cond)
             then = self._render_value(v.then)

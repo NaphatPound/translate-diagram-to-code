@@ -20,7 +20,7 @@ from .parser import (
     Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhileStmt, WhenStmt, TryStmt,
     BreakStmt, ContinueStmt, DefStmt, ReturnStmt, ExprStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, Arg,
-    ListLit, DictLit, Ternary, Range, FString, MethodCall, IndexAccess,
+    ListLit, DictLit, Ternary, Range, FString, MethodCall, IndexAccess, Spread,
 )
 
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -103,7 +103,10 @@ def _emit_stmt(stmt, depth: int, out: List[str], usage: dict) -> None:
         out.append(_INDENT * depth + "continue")
         return
     if isinstance(stmt, DefStmt):
-        head = f"def {stmt.name}" + (" " + " ".join(stmt.params) if stmt.params else "")
+        parts = []
+        for pn, pd in stmt.params:
+            parts.append(pn if pd is None else f"{pn}={_fmt_value(pd)}")
+        head = f"def {stmt.name}" + ((" " + " ".join(parts)) if parts else "")
         out.append(_INDENT * depth + head)
         _emit_block(stmt.body, depth + 1, out, usage)
         return
@@ -271,6 +274,8 @@ def _count_in_value(value, counts):
         _count_in_value(value.index, counts)
     elif isinstance(value, UnaryOp):
         _count_in_value(value.value, counts)
+    elif isinstance(value, Spread):
+        _count_in_value(value.value, counts)
 
 
 # ---------- calls ----------
@@ -356,6 +361,8 @@ def _fmt_value(v) -> str:
         return f"({l} {v.op} {r})"
     if isinstance(v, UnaryOp):
         return f"(!{_fmt_value(v.value)})" if v.op == "not" else f"({v.op} {_fmt_value(v.value)})"
+    if isinstance(v, Spread):
+        return f"*{_fmt_value(v.value)}"
     if isinstance(v, ListLit):
         return "[" + ", ".join(_fmt_value(x) for x in v.items) + "]"
     if isinstance(v, DictLit):

@@ -24,11 +24,13 @@ class TestDef(unittest.TestCase):
         ast = parse("def double x\n  return x * 2")
         self.assertIsInstance(ast.body[0], DefStmt)
         self.assertEqual(ast.body[0].name, "double")
-        self.assertEqual(ast.body[0].params, ["x"])
+        # params is now a list of (name, default-or-None) tuples.
+        self.assertEqual([p[0] for p in ast.body[0].params], ["x"])
+        self.assertEqual([p[1] for p in ast.body[0].params], [None])
 
     def test_def_with_multiple_params(self):
         ast = parse("def add a b\n  return a + b")
-        self.assertEqual(ast.body[0].params, ["a", "b"])
+        self.assertEqual([p[0] for p in ast.body[0].params], ["a", "b"])
 
     def test_def_no_params(self):
         ast = parse('def hello\n  p "hi"')

@@ -34,7 +34,7 @@ from .parser import (
     Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhileStmt, WhenStmt, TryStmt,
     DefStmt, ReturnStmt, ExprStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, ListLit, DictLit,
-    Ternary, Range, FString, MethodCall, IndexAccess, Arg,
+    Ternary, Range, FString, MethodCall, IndexAccess, Spread, Arg,
 )
 from .formatter import format_source
 
@@ -306,6 +306,8 @@ def _count_in_value(value, counts) -> None:
         _count_in_value(value.index, counts)
     elif isinstance(value, UnaryOp):
         _count_in_value(value.value, counts)
+    elif isinstance(value, Spread):
+        _count_in_value(value.value, counts)
 
 
 def _replace_and_drop(body, inlines):
@@ -406,4 +408,6 @@ def _replace_value(value, inlines, _expanding=None):
         )
     if isinstance(value, UnaryOp):
         return UnaryOp(value.op, _replace_value(value.value, inlines, _expanding))
+    if isinstance(value, Spread):
+        return Spread(_replace_value(value.value, inlines, _expanding))
     return value
