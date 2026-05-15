@@ -22,7 +22,7 @@ from typing import List, Optional
 from . import parse, ParseError
 from .parser import (
     Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhenStmt,
-    DefStmt, ReturnStmt,
+    DefStmt, ReturnStmt, BreakStmt, ContinueStmt, TryStmt, WhileStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, ListLit, DictLit,
 )
 from .verbs import VERBS
@@ -56,9 +56,35 @@ def lint_source(src: str) -> List[LintWarning]:
 
 def lint_program(program: Program) -> List[LintWarning]:
     warnings: List[LintWarning] = []
+    _check_dead_code(program.body, warnings)
     for stmt in program.body:
         _walk(stmt, warnings)
     return warnings
+
+
+def _check_dead_code(body: list, out: List[LintWarning]) -> None:
+    """Warn when any statement appears after a return / break / continue
+    in the same block — unreachable code."""
+    terminators = (ReturnStmt, BreakStmt, ContinueStmt)
+    for i, stmt in enumerate(body):
+        if isinstance(stmt, terminators) and i < len(body) - 1:
+            nxt = body[i + 1]
+            out.append(LintWarning(
+                getattr(nxt, "line", 0),
+                f"statement is unreachable (preceded by {type(stmt).__name__.replace('Stmt','').lower()})",
+                f"remove or move before the {type(stmt).__name__.replace('Stmt','').lower()}",
+            ))
+            return  # one warning per block is enough
+        # Recurse into nested blocks.
+        if isinstance(stmt, IfStmt):
+            _check_dead_code(stmt.then, out)
+            if stmt.else_:
+                _check_dead_code(stmt.else_, out)
+        elif isinstance(stmt, (EachStmt, RepeatStmt, WhileStmt, WhenStmt, DefStmt)):
+            _check_dead_code(stmt.body, out)
+        elif isinstance(stmt, TryStmt):
+            _check_dead_code(stmt.try_body, out)
+            _check_dead_code(stmt.catch_body, out)
 
 
 # ---------- traversal ----------
@@ -100,18 +126,17 @@ def _check_def(stmt: DefStmt, out: List[LintWarning]) -> None:
 
 
 def _check_if(stmt: IfStmt, out: List[LintWarning]) -> None:
-    """`if !cond` (or `if not cond`) without an else → `unless cond`."""
+    """`if !cond` with a MULTI-statement body → suggest `unless cond` block form.
+    Single-stmt bodies are indistinguishable from already-postfix-unless source,
+    so we don't suggest those (would produce false positives)."""
     cond = stmt.cond
     if (isinstance(cond, UnaryOp) and cond.op == "not"
-            and stmt.else_ is None and len(stmt.then) == 1):
-        # Single-stmt then-block w/ negated cond → suggest postfix unless.
+            and stmt.else_ is None and len(stmt.then) >= 2):
         inner = _value_to_src(cond.value)
-        # Find what the single stmt looks like by re-formatting it. For
-        # simplicity we just describe the rewrite — the user can apply.
         out.append(LintWarning(
             stmt.line,
-            f"`if !{inner}` with a single-stmt body can use postfix `unless`",
-            f"<body> unless {inner}",
+            f"`if !{inner}` block can use `unless {inner}`",
+            f"unless {inner}",
         ))
 
 

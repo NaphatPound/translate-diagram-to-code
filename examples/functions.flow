@@ -1,17 +1,18 @@
-# def with positional + default args, return, recursion, multi-return.
+# def with positional + default args, implicit return, recursion, multi-return.
+# The last bare expression in a def body becomes the return value.
 def double x
-  return x * 2
+  x * 2
 
 def scale x factor=2
-  return x * factor
+  x * factor
 
 def fact n
   if n <= 1
-    return 1
-  return n * fact(n - 1)
+    return 1                         # explicit return inside a branch
+  n * fact(n - 1)                    # implicit return as the last stmt
 
 def minmax xs
-  return [min(*xs), max(*xs)]
+  [min(*xs), max(*xs)]
 
 p double(5)             # 10
 p scale(5)              # 10  (default factor=2)

@@ -1,218 +1,157 @@
 # Flow — Few-Shot Examples
 
-Use these as the message history for the local LLM. Each block is one
-`user` → `assistant` exchange. Stop tokens for the assistant are not
-required; the model should learn to emit only Flow code.
+Use these as message history for the local LLM. Each block is a user request
+paired with the canonical compact Flow answer. The assistant should output
+only Flow source — no fences, no commentary.
+
+The examples lean on the language's compact features (single-letter aliases,
+implicit return, postfix-if, pipe, f-strings) so the model learns the short
+form by imitation.
 
 ---
 
-### Example 1 — Hello world
+USER: print hello
 
-USER:
-print "hello"
-
-ASSISTANT:
+A:
 ```
-print value="hello"
+p "hello"
 ```
 
 ---
 
-### Example 2 — Read a file and count lines
+USER: read notes.txt and count lines
 
-USER:
-read notes.txt and count lines
-
-ASSISTANT:
+A:
 ```
-read file=notes.txt -> text
+r "notes.txt" -> text
 split text=text sep="\n" -> lines
-count of=lines -> n
-print value=n
+p count(lines)
 ```
 
 ---
 
-### Example 3 — Filter and summarize
+USER: fetch users from the API, keep adults, summarize, save to report.txt
 
-USER:
-fetch users from the API, keep adults, summarize them, save report.txt
-
-ASSISTANT:
+A:
 ```
 when start
-  http_get url=https://api.example.com/users -> users
+  http_get "https://api.example.com/users" -> users
   filter from=users where="x['age'] >= 18" -> adults
-  summarize input=adults -> summary
-  write file=report.txt text=summary
-  print value="report saved"
+  summarize input=adults -> note
+  w file="report.txt" text=note
+  p "saved"
 ```
 
 ---
 
-### Example 4 — Loop with formatted output
+USER: for every user, print "hi NAME, age N"
 
-USER:
-for every user, print "hi NAME, age N"
-
-ASSISTANT:
+A:
 ```
 each user in users
-  format template="hi {name}, age {age}" data=user -> msg
-  print value=msg
+  p f"hi {user.name}, age {user.age}"
 ```
 
 ---
 
-### Example 5 — Conditional branch
+USER: print "big" if balance > 1000, else "small"
 
-USER:
-if balance is more than 1000, print "approved", else "rejected"
-
-ASSISTANT:
+A:
 ```
-if balance > 1000
-  print value="approved"
-else
-  print value="rejected"
+p (balance > 1000 ? "big" : "small")
 ```
 
 ---
 
-### Example 6 — Repeat with side effect
+USER: ask three times and join the answers
 
-USER:
-ask user three times and collect their answers
-
-ASSISTANT:
+A:
 ```
-split text="" sep="," -> answers
-repeat 3
-  ask prompt="answer? " -> a
-  join from=answers sep="," -> joined
-  format template="{prev},{new}" data={"prev": joined, "new": a} -> answers
-```
-
-(NOTE: this example shows the limit of one-liners — when state accumulation
-gets complex, prefer using `each` + a helper variable.)
-
----
-
-### Example 7 — Error correction
-
-USER (the parser previously rejected the assistant's code):
-```
-read file=data.csv -> rows
-filter rows where age>18 -> adults
-```
-parser error: `line 2:13: arg 'rows' must be followed by '='`
-
-ASSISTANT (fixed):
-```
-read file=data.csv -> rows
-filter from=rows where="x['age'] > 18" -> adults
-```
-
-(The fix: use named arg `from=`, and quote the predicate.)
-
----
-
-### Example 8 — Translation pipeline
-
-USER:
-read paragraph from input.txt, translate to Thai, save as output.txt
-
-ASSISTANT:
-```
-read file=input.txt -> text
-translate text=text to=th -> translated
-write file=output.txt text=translated
-print value="done"
+parts = []
+repeat 3 as i
+  ask "answer? " -> a
+  parts = [*parts, a]
+p join(parts, ",")
 ```
 
 ---
 
-### Example 9 — Top-3 by score
+USER (parser previously rejected):
+    read file=data.csv -> rows
+    filter rows where age>18 -> adults
+error: `line 2:13: arg 'rows' must be followed by '='`
 
-USER:
-load scores.json, sort by score descending, take top 3, print
-
-ASSISTANT:
+A (fixed — use named arg + quote the predicate, then chain):
 ```
-load file=scores.json -> items
-sort from=items by="-x['score']" -> ranked
-take from=ranked n=3 -> top
+r "data.csv" | filter where="x['age'] > 18" -> adults
+```
+
+---
+
+USER: read input.txt, translate to Thai, save as output.txt
+
+A:
+```
+r "input.txt" | translate to=th | w file="output.txt"
+```
+
+---
+
+USER: load scores.json, sort by score descending, take top 3, print
+
+A:
+```
+load "scores.json" -> items
+sort from=items by="-x['score']" | take n=3 -> top
 each item in top
-  print value=item
+  p item
 ```
 
 ---
 
-### Example 10 — Compact form (pipe + positional primary)
+USER: define double(x) and call it
 
-USER:
-read input.txt, uppercase, save to output.txt
-
-ASSISTANT (compact — preferred for linear pipelines):
+A:
 ```
-read "input.txt" | upper | write file="output.txt"
-```
+def double x
+  x * 2
 
-ASSISTANT (equivalent longhand):
-```
-read file="input.txt" -> text
-upper text=text -> big
-write file="output.txt" text=big
-```
-
-The compact form uses two pieces of sugar:
-  - Positional primary arg: `read "x"` ≡ `read file="x"`, `upper "y"` ≡ `upper text="y"`.
-  - Pipe `|`: the upstream value flows into the next verb's primary arg, so
-    you don't have to name intermediates.
-
----
-
-### Example 11 — Mixing pipe with named args
-
-USER:
-fetch users, keep adults, summarize
-
-ASSISTANT:
-```
-http_get "https://api.example.com/users" | filter where="x['age'] >= 18" | summarize -> note
-print note
+p double(5)
 ```
 
 ---
 
-### Example 12 — Assignment + aliases (shortest form)
+USER: factorial of 10
 
-USER:
-sum the list [1, 2, 3, 4, 5] and print it.
+A:
+```
+def fact n
+  if n <= 1
+    return 1
+  n * fact(n - 1)
 
-ASSISTANT (compact, preferred):
+p fact(10)
 ```
-xs = [1, 2, 3, 4, 5]
-t = sum(xs)
-p t
-```
-
-ASSISTANT (longhand):
-```
-sum of=[1, 2, 3, 4, 5] -> t
-print value=t
-```
-
-Use `name = expr` for any math (`+`, `-`, `*`, `/`, comparisons) or function
-call on the RHS — it's shorter than calling add/sub/mul/div/count verbs.
-Single-letter aliases: p r w f m c u l s t. Pipe `|` for chains.
 
 ---
 
-### Anti-pattern reminders (do NOT do these)
+USER: safely look up a config key, fall back to a default
 
-- ❌ `let x = read("data.csv")`  (no `let`, no parens; use `read file=data.csv -> x`)
-- ❌ `if x = 1`                  (use `==` for comparison)
-- ❌ `print(x)`                  (no parens around args; use `print value=x`)
-- ❌ `each row in rows:`         (no trailing colon)
-- ❌ 4-space indent              (always 2 spaces)
+A:
+```
+host = config?.db?.host ?? "localhost"
+p host
+```
+
+---
+
+## Anti-patterns to avoid
+
+- ❌ `let x = ...`            ✅ `x = ...`
+- ❌ `if x = 1`               ✅ `if x == 1`
+- ❌ `print(x)` / `print value=x`     ✅ `p x`
+- ❌ `each row in rows:`              ✅ `each row in rows` (no colon)
+- ❌ 4-space indent                   ✅ 2-space indent
+- ❌ `return x` at def end            ✅ bare `x` (implicit return)
+- ❌ `add a=1 b=2 -> s`               ✅ `s = 1 + 2` (use assignment for math)
+- ❌ `count of=items -> n`            ✅ `n = count(items)` (assignment + funccall)

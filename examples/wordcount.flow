@@ -1,5 +1,4 @@
 # Read a text file, count words, print result.
-read file="examples/words.txt" -> text
+r "examples/words.txt" -> text
 split text=text sep=" " -> words
-count of=words -> n
-print value=n
+p count(words)
