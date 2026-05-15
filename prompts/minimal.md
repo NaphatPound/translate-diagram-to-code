@@ -30,7 +30,9 @@ Output Flow source only. No prose, fences, or commentary.
   `x in xs` / `x not in xs` (membership),
   `cond ? a : b` or `a if cond else b` (ternary, either form),
   `a ?? b`, `a?.b`.
-- Member: `obj.attr`, `obj["k"]`, `arr[i]`, `arr[a..b]` (slice), `s.method(args)`.
+- Member: `obj.attr`, `obj["k"]`, `arr[i]`, `arr[a..b]` (inclusive),
+  `arr[a:b]` / `arr[:b]` / `arr[a:]` / `arr[:]` (Python-style exclusive),
+  `s.method(args)`.
 - Spread: `*xs` inside lists / funccall args.
 
 ## Aliases (use to save tokens)

@@ -113,7 +113,22 @@ class Range:
     """Inclusive integer range literal: `start..end` ≡ list [start..end]."""
     start: Value
     end: Value
-    kind: str = "range"
+
+
+@dataclass
+class Slice:
+    """Python-style exclusive slice inside `[]`. Either bound may be None.
+
+    `xs[a:b]`  → Slice(a, b)
+    `xs[a:]`   → Slice(a, None)
+    `xs[:b]`   → Slice(None, b)
+    `xs[:]`    → Slice(None, None)
+
+    Distinct from Range so the compiler can emit the natural `xs[a:b]`
+    in Python (no +1) and not confuse this with the inclusive `..` form.
+    """
+    start: Optional[Value]
+    end: Optional[Value]
 
 
 @dataclass
@@ -854,7 +869,25 @@ class _Parser:
         while i < len(toks) and toks[i].kind in ("DOT", "OPTDOT", "LBRACK"):
             if toks[i].kind == "LBRACK":
                 i += 1
-                idx_expr, i = self._parse_expr(toks, i, line_no)
+                # Python-style slice: optional start, `:`, optional end.
+                # `xs[:]`, `xs[a:]`, `xs[:b]`, `xs[a:b]`
+                start_expr = None
+                if i < len(toks) and toks[i].kind != "COLON":
+                    start_expr, i = self._parse_expr(toks, i, line_no)
+                if i < len(toks) and toks[i].kind == "COLON":
+                    i += 1
+                    end_expr = None
+                    if i < len(toks) and toks[i].kind != "RBRACK":
+                        end_expr, i = self._parse_expr(toks, i, line_no)
+                    idx_expr: Value = Slice(start=start_expr, end=end_expr)
+                else:
+                    if start_expr is None:
+                        raise ParseError(
+                            "empty index access — use xs[i] or xs[a:b]",
+                            toks[i].line if i < len(toks) else line_no,
+                            toks[i].col if i < len(toks) else 1,
+                        )
+                    idx_expr = start_expr
                 if i >= len(toks) or toks[i].kind != "RBRACK":
                     raise ParseError(
                         "expected ']' to close index access",

@@ -22,7 +22,7 @@ from .parser import (
     Program, Call, AssignStmt, MultiAssignStmt, IfStmt, EachStmt, RepeatStmt, WhileStmt, WhenStmt, TryStmt,
     BreakStmt, ContinueStmt, DefStmt, ReturnStmt, ExprStmt, MatchStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, Arg,
-    ListLit, DictLit, Ternary, Range, FString, MethodCall, IndexAccess, Spread,
+    ListLit, DictLit, Ternary, Range, Slice, FString, MethodCall, IndexAccess, Spread,
 )
 
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -1062,7 +1062,7 @@ class _Compiler:
             return f"{rec}.{v.method}({args})"
         if isinstance(v, IndexAccess):
             rec = self._render_value(v.receiver)
-            # Slice: `s[a..b]` (inclusive). Detect Range index, emit native slice.
+            # Inclusive slice: `s[a..b]` (Range index).
             if isinstance(v.index, Range):
                 s_src = self._render_value(v.index.start)
                 e_src = self._render_value(v.index.end)
@@ -1075,8 +1075,27 @@ class _Compiler:
                 if self.lang == "rust":
                     return f"&{rec}[{s_src}..=({e_src})]"
                 if self.lang == "bash":
-                    # Bash slice: ${var:offset:length}
                     return f"${{{rec.lstrip('$')}:{s_src}:(({e_src}) - {s_src} + 1)}}"
+            # Python-style exclusive slice: `s[a:b]` with optional ends.
+            if isinstance(v.index, Slice):
+                s = "" if v.index.start is None else self._render_value(v.index.start)
+                e = "" if v.index.end is None else self._render_value(v.index.end)
+                if self.lang in ("python", "go"):
+                    return f"{rec}[{s}:{e}]"
+                if self.lang == "js":
+                    # Slice signature: (begin, end?) — undefined means "to end".
+                    if v.index.end is None:
+                        return f"({rec}).slice({s or '0'})"
+                    return f"({rec}).slice({s or '0'}, {e})"
+                if self.lang == "rust":
+                    s_part = s if v.index.start is not None else ""
+                    e_part = e if v.index.end is not None else ""
+                    return f"&{rec}[{s_part}..{e_part}]"
+                if self.lang == "bash":
+                    # Best-effort: ${var:start:length} — needs end-start.
+                    if v.index.start is not None and v.index.end is not None:
+                        return f"${{{rec.lstrip('$')}:{s}:(({e}) - {s})}}"
+                    return f"${{{rec.lstrip('$')}}}"  # giving up — full var
             idx = self._render_value(v.index)
             if self.lang == "bash":
                 return f"${{{rec.lstrip('$')}[{idx}]}}"

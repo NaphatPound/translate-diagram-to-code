@@ -34,7 +34,7 @@ from .parser import (
     Program, Call, AssignStmt, MultiAssignStmt, IfStmt, EachStmt, RepeatStmt, WhileStmt, WhenStmt, TryStmt,
     DefStmt, ReturnStmt, ExprStmt, MatchStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, ListLit, DictLit,
-    Ternary, Range, FString, MethodCall, IndexAccess, Spread, Arg,
+    Ternary, Range, Slice, FString, MethodCall, IndexAccess, Spread, Arg,
 )
 from .formatter import format_source
 
@@ -240,6 +240,11 @@ def _simplify_value(v):
         return Spread(_simplify_value(v.value))
     if isinstance(v, Range):
         return Range(_simplify_value(v.start), _simplify_value(v.end))
+    if isinstance(v, Slice):
+        return Slice(
+            start=None if v.start is None else _simplify_value(v.start),
+            end=None if v.end is None else _simplify_value(v.end),
+        )
     if isinstance(v, FString):
         new_parts = []
         for part in v.parts:
@@ -581,6 +586,9 @@ def _is_safe_to_inline(value) -> bool:
                 and _is_safe_to_inline(value.else_))
     if isinstance(value, Range):
         return _is_safe_to_inline(value.start) and _is_safe_to_inline(value.end)
+    if isinstance(value, Slice):
+        return ((value.start is None or _is_safe_to_inline(value.start))
+                and (value.end is None or _is_safe_to_inline(value.end)))
     if isinstance(value, ListLit):
         return all(_is_safe_to_inline(x) for x in value.items)
     if isinstance(value, DictLit):
@@ -648,6 +656,11 @@ def _count_in_value(value, counts) -> None:
     elif isinstance(value, Range):
         _count_in_value(value.start, counts)
         _count_in_value(value.end, counts)
+    elif isinstance(value, Slice):
+        if value.start is not None:
+            _count_in_value(value.start, counts)
+        if value.end is not None:
+            _count_in_value(value.end, counts)
     elif isinstance(value, ListLit):
         for x in value.items:
             _count_in_value(x, counts)
@@ -738,6 +751,13 @@ def _replace_value(value, inlines, _expanding=None):
     if isinstance(value, Range):
         return Range(_replace_value(value.start, inlines, _expanding),
                      _replace_value(value.end, inlines, _expanding))
+    if isinstance(value, Slice):
+        return Slice(
+            start=(None if value.start is None
+                   else _replace_value(value.start, inlines, _expanding)),
+            end=(None if value.end is None
+                 else _replace_value(value.end, inlines, _expanding)),
+        )
     if isinstance(value, ListLit):
         return ListLit([_replace_value(x, inlines, _expanding) for x in value.items])
     if isinstance(value, DictLit):

@@ -20,7 +20,7 @@ from .parser import (
     Program, Call, AssignStmt, MultiAssignStmt, IfStmt, EachStmt, RepeatStmt, WhileStmt, WhenStmt, TryStmt,
     BreakStmt, ContinueStmt, DefStmt, ReturnStmt, ExprStmt, MatchStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, Arg,
-    ListLit, DictLit, Ternary, Range, FString, MethodCall, IndexAccess, Spread,
+    ListLit, DictLit, Ternary, Range, Slice, FString, MethodCall, IndexAccess, Spread,
 )
 
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -294,6 +294,11 @@ def _count_in_value(value, counts):
     elif isinstance(value, Range):
         _count_in_value(value.start, counts)
         _count_in_value(value.end, counts)
+    elif isinstance(value, Slice):
+        if value.start is not None:
+            _count_in_value(value.start, counts)
+        if value.end is not None:
+            _count_in_value(value.end, counts)
     elif isinstance(value, ListLit):
         for x in value.items:
             _count_in_value(x, counts)
@@ -415,6 +420,10 @@ def _fmt_value(v) -> str:
         return f"({_fmt_value(v.cond)} ? {_fmt_value(v.then)} : {_fmt_value(v.else_)})"
     if isinstance(v, Range):
         return f"{_fmt_value(v.start)}..{_fmt_value(v.end)}"
+    if isinstance(v, Slice):
+        s = "" if v.start is None else _fmt_value(v.start)
+        e = "" if v.end is None else _fmt_value(v.end)
+        return f"{s}:{e}"
     if isinstance(v, FString):
         body = ""
         for part in v.parts:
