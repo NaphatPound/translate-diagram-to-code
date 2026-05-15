@@ -267,8 +267,8 @@ def _count_in_value(value, counts):
             _count_in_value(v, counts)
     elif isinstance(value, FString):
         for kind, payload in value.parts:
-            if kind == "var":
-                counts[payload] = counts.get(payload, 0) + 1
+            if kind == "expr":
+                _count_in_value(payload, counts)
     elif isinstance(value, MethodCall):
         _count_in_value(value.receiver, counts)
         if value.args is not None:
@@ -386,7 +386,9 @@ def _fmt_value(v) -> str:
             if kind == "text":
                 body += payload.replace('"', '\\"')
             else:
-                body += "{" + payload + "}"
+                # payload is a Value — render via the formatter so it can
+                # round-trip through parse/format/parse.
+                body += "{" + _fmt_value(payload) + "}"
         return f'f"{body}"'
     if isinstance(v, MethodCall):
         rec = _fmt_value(v.receiver)

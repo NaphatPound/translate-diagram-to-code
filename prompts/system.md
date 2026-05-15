@@ -72,11 +72,16 @@ follow these rules exactly. The parser is strict; deviations will fail.
     semantics). Use this instead of `if count(items) > 0`. JS targets compile
     differently — prefer the explicit `count(items) > 0` if you need
     cross-language portability.
-19. **F-string interpolation** `f"..."` — references in `{name}` are pulled from
-    scope. Way shorter than the `format` verb:
-        p f"hi {name}, age {age}"      # ≡ format template=... data=... + print
-    Escape a literal `{` by writing `\{`. Compiles natively to each target
-    (Python f-string, JS template literal, Go `Sprintf`, Rust `format!`, Bash).
+19. **F-string interpolation** `f"..."` — placeholders accept any Flow
+    expression (not just bare names). Each placeholder is parsed and
+    re-compiled per target, so language-specific transformations apply
+    (e.g. `count()` becomes `len()` in Python automatically):
+        p f"hi {name}, age {age}"
+        p f"len={count(items)}, total={sum(items)}"
+        p f"clean='{s.strip().upper()}'"
+        p f"squared({i}) = {i * i}"
+    Compiles natively to each target (Python f-string, JS template literal,
+    Go `fmt.Sprintf`, Rust `format!`, Bash interpolation).
 20. **Method calls + chains** `name.method(args).method2()` — any value can be
     followed by `.name` (attribute) or `.name(args)` (method). Chains work:
         s = "  hello, world  "

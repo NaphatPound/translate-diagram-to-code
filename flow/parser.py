@@ -1325,9 +1325,16 @@ _FSTRING_PLACEHOLDER = re.compile(r"\{([^{}]+)\}")
 
 
 def _parse_fstring(content: str, line: int, col: int) -> "FString":
-    """Split `hi {name}, age {age}` into [("text", "hi "), ("var", "name"),
-    ("text", ", age "), ("var", "age")]. Escape `\\{` to keep a literal `{`."""
-    parts: List[Tuple[str, str]] = []
+    """Split an f-string body into text segments and parsed-expression segments.
+
+    Returns FString.parts as alternating tuples:
+      ("text", str)            literal text fragment
+      ("expr", Value)          parsed Flow expression — re-rendered per target
+
+    `\\{` is intentionally not honored: f-string placeholders are delimited
+    by `{` … `}` and the inner content is treated as a Flow expression.
+    """
+    parts: List[Tuple[str, object]] = []
     pos = 0
     while pos < len(content):
         m = _FSTRING_PLACEHOLDER.search(content, pos)
@@ -1336,9 +1343,26 @@ def _parse_fstring(content: str, line: int, col: int) -> "FString":
             break
         if m.start() > pos:
             parts.append(("text", content[pos:m.start()]))
-        parts.append(("var", m.group(1)))
+        placeholder = m.group(1)
+        # Tokenize + parse the placeholder as a Flow expression.
+        try:
+            sub_tokens = _tokenize_line(placeholder, line)
+        except ParseError as e:
+            raise ParseError(
+                f"invalid f-string placeholder {{{placeholder}}}: {e.msg}",
+                line, col + m.start(),
+            )
+        if not sub_tokens:
+            raise ParseError(f"empty f-string placeholder", line, col + m.start())
+        sub_parser = _Parser([])
+        expr, end = sub_parser._parse_expr(sub_tokens, 0, line)
+        if end != len(sub_tokens):
+            raise ParseError(
+                f"unexpected token {sub_tokens[end].value!r} in f-string placeholder",
+                sub_tokens[end].line, sub_tokens[end].col,
+            )
+        parts.append(("expr", expr))
         pos = m.end()
-    # Filter out empty text parts for cleaner downstream handling.
     parts = [p for p in parts if not (p[0] == "text" and p[1] == "")]
     return FString(parts=parts)
 

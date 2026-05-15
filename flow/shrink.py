@@ -296,8 +296,8 @@ def _count_in_value(value, counts) -> None:
             _count_in_value(v, counts)
     elif isinstance(value, FString):
         for kind, payload in value.parts:
-            if kind == "var":
-                counts[payload] = counts.get(payload, 0) + 1
+            if kind == "expr":
+                _count_in_value(payload, counts)
     elif isinstance(value, MethodCall):
         _count_in_value(value.receiver, counts)
         if value.args is not None:
@@ -383,17 +383,11 @@ def _replace_value(value, inlines, _expanding=None):
     if isinstance(value, DictLit):
         return DictLit([(k, _replace_value(v, inlines, _expanding)) for k, v in value.entries])
     if isinstance(value, FString):
-        # Only replace `var` parts whose RHS is another simple Name (a rename).
-        # Replacing with a non-Name value would require splicing the f-string,
-        # which complicates the rendering; skip those.
+        # `expr` parts are full Value AST nodes; recurse to substitute inlinables.
         new_parts = []
         for kind, payload in value.parts:
-            if kind == "var" and payload in inlines and payload not in _expanding:
-                inner = inlines[payload]
-                if isinstance(inner, Name) and len(inner.parts) == 1:
-                    new_parts.append(("var", inner.parts[0]))
-                else:
-                    new_parts.append((kind, payload))
+            if kind == "expr":
+                new_parts.append(("expr", _replace_value(payload, inlines, _expanding)))
             else:
                 new_parts.append((kind, payload))
         return FString(parts=new_parts)

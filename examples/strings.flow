@@ -1,20 +1,16 @@
 # String operations: methods, slice, f-string, concat.
-# F-string placeholders use the TARGET language's expression syntax
-# (Python here), so keep them to simple variable names. For Flow-style
-# expressions, compute first and assign to a name, then interpolate.
+# F-string placeholders are full Flow expressions — they compile to the
+# target language's native interpolation form, so `count()` becomes `len()`
+# in Python, etc.
 
 s = "  Hello, World!  "
 clean = s.strip()
 upper = clean.upper()
-n = count(upper)
-head = upper[0..4]
-tail = upper[7..11]
-p f"len={n}, first={head}, last={tail}"
+p f"len={count(upper)}, first={upper[0..4]}, last={upper[7..11]}"
 
-# Concat with `+` plus a method chain.
+# Concat with `+` plus a method chain inside an f-string.
 parts = clean.split(",")
-first = parts[0].strip()
-p f"first part: {first}"
+p f"first part: {parts[0].strip()}"
 
 # Simple template with two interpolations.
 name = "alice"; age = 30

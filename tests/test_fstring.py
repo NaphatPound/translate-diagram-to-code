@@ -29,14 +29,16 @@ class TestFStringParse(unittest.TestCase):
     def test_single_placeholder(self):
         ast = parse('p f"hi {name}"')
         v = ast.body[0].args[0].value
-        self.assertEqual(v.parts, [("text", "hi "), ("var", "name")])
+        # New shape: placeholder is a parsed Flow expression (Value).
+        self.assertEqual(len(v.parts), 2)
+        self.assertEqual(v.parts[0], ("text", "hi "))
+        self.assertEqual(v.parts[1][0], "expr")
 
     def test_multiple_placeholders(self):
         ast = parse('p f"hi {a}, age {b}!"')
         v = ast.body[0].args[0].value
-        self.assertEqual(v.parts, [("text", "hi "), ("var", "a"),
-                                    ("text", ", age "), ("var", "b"),
-                                    ("text", "!")])
+        kinds = [p[0] for p in v.parts]
+        self.assertEqual(kinds, ["text", "expr", "text", "expr", "text"])
 
 
 class TestFStringCompile(unittest.TestCase):
@@ -61,7 +63,9 @@ class TestFStringCompile(unittest.TestCase):
 
     def test_bash_var_interp(self):
         sh = compile_to(parse('name = "x"\np f"hi {name}"'), "bash")
-        self.assertIn('"hi ${name}"', sh)
+        # Bash accepts either `$name` or `${name}` interpolation.
+        self.assertTrue('"hi $name"' in sh or '"hi ${name}"' in sh,
+                        f"unexpected bash output: {sh}")
 
     def test_round_trip_format(self):
         out = format_source(parse('p f"hi {name}, {age}"'))

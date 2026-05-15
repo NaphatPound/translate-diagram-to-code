@@ -930,16 +930,17 @@ class _Compiler:
         return json.dumps(s, ensure_ascii=False)
 
     def _render_fstring(self, fs: FString) -> str:
-        """Render `f"..."` per target language. Variables that aren't in
-        scope are rendered as literal text (consistent with how bareword
-        Names degrade to strings)."""
+        """Render `f"..."` per target language. Placeholder content is a
+        parsed Flow expression: render it with `_render_value` so language-
+        specific transformations (e.g. count → len, dotted name → dict
+        access) apply consistently with the rest of the program."""
         if self.lang == "python":
             buf = []
             for kind, payload in fs.parts:
                 if kind == "text":
                     buf.append(_escape_for_fstring(payload, "python"))
                 else:
-                    buf.append("{" + payload + "}")
+                    buf.append("{" + self._render_value(payload) + "}")
             return 'f"' + "".join(buf) + '"'
         if self.lang == "js":
             buf = []
@@ -947,7 +948,7 @@ class _Compiler:
                 if kind == "text":
                     buf.append(_escape_for_fstring(payload, "js"))
                 else:
-                    buf.append("${" + payload + "}")
+                    buf.append("${" + self._render_value(payload) + "}")
             return "`" + "".join(buf) + "`"
         if self.lang == "go":
             fmt = ""
@@ -957,7 +958,7 @@ class _Compiler:
                     fmt += payload.replace("%", "%%")
                 else:
                     fmt += "%v"
-                    args.append(payload)
+                    args.append(self._render_value(payload))
             quoted = json.dumps(fmt, ensure_ascii=False)
             if args:
                 return f"fmt.Sprintf({quoted}, {', '.join(args)})"
@@ -970,7 +971,7 @@ class _Compiler:
                     fmt += payload.replace("{", "{{").replace("}", "}}")
                 else:
                     fmt += "{}"
-                    args.append(payload)
+                    args.append(self._render_value(payload))
             quoted = json.dumps(fmt, ensure_ascii=False)
             if args:
                 return f"format!({quoted}, {', '.join(args)})"
@@ -981,7 +982,14 @@ class _Compiler:
                 if kind == "text":
                     buf.append(payload)
                 else:
-                    buf.append("${" + payload + "}")
+                    rendered = self._render_value(payload)
+                    # If the rendered form already starts with `$`, embed
+                    # bare. Otherwise wrap as `$(...)` so Bash expands the
+                    # arithmetic/command expression.
+                    if rendered.startswith("$"):
+                        buf.append(rendered)
+                    else:
+                        buf.append("$(" + rendered + ")")
             return '"' + "".join(buf).replace('"', '\\"') + '"'
         raise CompileError(f"f-string not supported for lang {self.lang!r}")
 

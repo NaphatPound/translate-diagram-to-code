@@ -11,8 +11,7 @@ p xs[2..5]
 # Spread to merge lists.
 ys = [100, 200]
 combined = [*xs, *ys, 999]
-n = count(combined)
-p f"len = {n}"
+p f"len = {count(combined)}"
 
 # Dict.
 user = {name: "alice", age: 30}
