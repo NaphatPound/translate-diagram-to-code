@@ -21,9 +21,10 @@ from typing import List, Optional
 
 from . import parse, ParseError
 from .parser import (
-    Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhenStmt,
-    DefStmt, ReturnStmt, BreakStmt, ContinueStmt, TryStmt, WhileStmt,
+    Program, Call, AssignStmt, MultiAssignStmt, IfStmt, EachStmt, RepeatStmt,
+    WhenStmt, DefStmt, ReturnStmt, BreakStmt, ContinueStmt, TryStmt, WhileStmt, ExprStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, ListLit, DictLit,
+    Ternary, Range, FString, MethodCall, IndexAccess, Spread,
 )
 from .verbs import VERBS
 
@@ -57,9 +58,142 @@ def lint_source(src: str) -> List[LintWarning]:
 def lint_program(program: Program) -> List[LintWarning]:
     warnings: List[LintWarning] = []
     _check_dead_code(program.body, warnings)
+    _check_unused_vars(program.body, warnings)
     for stmt in program.body:
         _walk(stmt, warnings)
     return warnings
+
+
+def _check_unused_vars(body: list, out: List[LintWarning]) -> None:
+    """Warn on AssignStmt targets that are never referenced. Names starting
+    with `_` are exempt. Inside a DefStmt, the function name is exempt
+    (recursion + external call). Inside a loop, the loop var is exempt."""
+    # Build a global usage map from the entire program.
+    usage = _count_all_names(body)
+
+    def walk(stmts):
+        for s in stmts:
+            if isinstance(s, AssignStmt):
+                if (not s.target.startswith("_")
+                        and usage.get(s.target, 0) == 0):
+                    out.append(LintWarning(
+                        s.line,
+                        f"variable {s.target!r} is assigned but never used",
+                        f"remove the assignment, or rename to `_{s.target}` to silence",
+                    ))
+            # Recurse into nested blocks where assignments can also appear.
+            if isinstance(s, IfStmt):
+                walk(s.then)
+                if s.else_:
+                    walk(s.else_)
+            elif isinstance(s, (EachStmt, RepeatStmt, WhileStmt, WhenStmt)):
+                walk(s.body)
+            elif isinstance(s, TryStmt):
+                walk(s.try_body)
+                walk(s.catch_body)
+            elif isinstance(s, DefStmt):
+                _check_unused_params(s, out)
+                walk(s.body)
+    walk(body)
+
+
+def _check_unused_params(stmt: DefStmt, out: List[LintWarning]) -> None:
+    """Warn on def params that are never referenced inside the body."""
+    body_usage = _count_all_names(stmt.body)
+    for pname, _default in stmt.params:
+        if pname.startswith("_"):
+            continue
+        if body_usage.get(pname, 0) == 0:
+            out.append(LintWarning(
+                stmt.line,
+                f"param {pname!r} of def {stmt.name!r} is never used",
+                f"remove from signature, or rename to `_{pname}` to silence",
+            ))
+
+
+def _count_all_names(body) -> dict:
+    """Count Name references across body (and nested blocks). Doesn't count
+    AssignStmt targets (the LHS of `name = expr`)."""
+    counts: dict = {}
+    def in_value(v):
+        if isinstance(v, Name) and v.parts:
+            counts[v.parts[0]] = counts.get(v.parts[0], 0) + 1
+        elif isinstance(v, BinOp):
+            in_value(v.left); in_value(v.right)
+        elif isinstance(v, UnaryOp):
+            in_value(v.value)
+        elif isinstance(v, FuncCall):
+            for a in v.args:
+                in_value(a)
+        elif isinstance(v, ListLit):
+            for x in v.items:
+                in_value(x)
+        elif isinstance(v, DictLit):
+            for _k, vv in v.entries:
+                in_value(vv)
+        elif isinstance(v, Ternary):
+            in_value(v.cond); in_value(v.then); in_value(v.else_)
+        elif isinstance(v, Range):
+            in_value(v.start); in_value(v.end)
+        elif isinstance(v, FString):
+            for kind, payload in v.parts:
+                if kind == "expr":
+                    in_value(payload)
+        elif isinstance(v, MethodCall):
+            in_value(v.receiver)
+            if v.args is not None:
+                for a in v.args:
+                    in_value(a)
+        elif isinstance(v, IndexAccess):
+            in_value(v.receiver); in_value(v.index)
+        elif isinstance(v, Spread):
+            in_value(v.value)
+    def walk(stmts):
+        for s in stmts:
+            if isinstance(s, Call):
+                for a in s.args:
+                    in_value(a.value)
+            elif isinstance(s, AssignStmt):
+                in_value(s.value)
+            elif isinstance(s, MultiAssignStmt):
+                in_value(s.value)
+            elif isinstance(s, IfStmt):
+                in_value(s.cond)
+                walk(s.then)
+                if s.else_:
+                    walk(s.else_)
+            elif isinstance(s, EachStmt):
+                in_value(s.iterable)
+                walk(s.body)
+            elif isinstance(s, RepeatStmt):
+                in_value(s.count)
+                walk(s.body)
+            elif isinstance(s, WhileStmt):
+                in_value(s.cond)
+                walk(s.body)
+            elif isinstance(s, WhenStmt):
+                for a in s.args:
+                    in_value(a)
+                walk(s.body)
+            elif isinstance(s, TryStmt):
+                walk(s.try_body)
+                walk(s.catch_body)
+            elif isinstance(s, DefStmt):
+                # The function name itself counts as used (it's a definition,
+                # not a reference, but external callers may use it).
+                counts[s.name] = counts.get(s.name, 0) + 1
+                # Defaults can reference outer scope.
+                for _n, d in s.params:
+                    if d is not None:
+                        in_value(d)
+                walk(s.body)
+            elif isinstance(s, ReturnStmt):
+                if s.value is not None:
+                    in_value(s.value)
+            elif isinstance(s, ExprStmt):
+                in_value(s.value)
+    walk(body)
+    return counts
 
 
 def _check_dead_code(body: list, out: List[LintWarning]) -> None:
