@@ -273,6 +273,7 @@ TOKEN_SPEC = [
     ("RBRACE", r"\}"),
     ("COLON", r":"),
     ("COMMA", r","),
+    ("SEMI", r";"),
     ("DOT", r"\."),
     # Bareword: starts with letter/underscore. May include `-` for file/url
     # fragments. Dots are tokenised separately (DOT) so `data.csv`, `a.b.c`,
@@ -335,14 +336,16 @@ class _Line:
 
 
 def _split_lines(src: str) -> List[_Line]:
-    """Return non-empty, non-comment lines with indent + tokens."""
+    """Return non-empty, non-comment lines with indent + tokens.
+
+    Lines containing top-level `;` are split into separate _Line entries at
+    the same indent so `a = 1; b = 2; p a + b` parses as three statements.
+    """
     out: List[_Line] = []
     for i, raw in enumerate(src.splitlines(), start=1):
-        # strip trailing comment
         code = _strip_comment(raw)
         if not code.strip():
             continue
-        # measure indent (count leading spaces; tabs forbidden for simplicity)
         if "\t" in code[: len(code) - len(code.lstrip())]:
             raise ParseError("tabs not allowed for indentation; use 2 spaces", i, 1)
         indent_spaces = len(code) - len(code.lstrip(" "))
@@ -352,8 +355,28 @@ def _split_lines(src: str) -> List[_Line]:
         tokens = _tokenize_line(code[indent_spaces:], i)
         if not tokens:
             continue
-        out.append(_Line(indent, tokens, i, raw))
+        # Split at top-level SEMI tokens.
+        for seg in _split_at_top_level_semi(tokens):
+            if seg:
+                out.append(_Line(indent, seg, i, raw))
     return out
+
+
+def _split_at_top_level_semi(tokens):
+    """Yield token segments separated by `;` outside any (), [], {} group."""
+    segment: list = []
+    depth = 0
+    for t in tokens:
+        if t.kind in ("LPAREN", "LBRACK", "LBRACE"):
+            depth += 1
+        elif t.kind in ("RPAREN", "RBRACK", "RBRACE"):
+            depth = max(0, depth - 1)
+        if t.kind == "SEMI" and depth == 0:
+            yield segment
+            segment = []
+            continue
+        segment.append(t)
+    yield segment
 
 
 def _strip_comment(line: str) -> str:

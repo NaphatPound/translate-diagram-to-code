@@ -103,6 +103,10 @@ follow these rules exactly. The parser is strict; deviations will fail.
 26. **Unary not** — `!x` or `not x`. Both parse to the same UnaryOp:
         if !found
           p "missing"
+26a. **Multi-statement lines** — `;` separates statements on a single line:
+        a = 5; b = 10; p a + b
+    Useful for tight test scripts; each segment is parsed as if on its
+    own line at the same indent.
 27. **Try/catch** — `try` block followed by `catch [name]` block at the same
     indent. `name` is bound to the error in the catch body; omit to use `_e`.
         try
