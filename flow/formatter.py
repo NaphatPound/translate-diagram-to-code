@@ -390,10 +390,11 @@ def _fmt_value(v) -> str:
         return f'f"{body}"'
     if isinstance(v, MethodCall):
         rec = _fmt_value(v.receiver)
+        dot = "?." if v.optional else "."
         if v.args is None:
-            return f"{rec}.{v.method}"
+            return f"{rec}{dot}{v.method}"
         args = ", ".join(_fmt_value(a) for a in v.args)
-        return f"{rec}.{v.method}({args})"
+        return f"{rec}{dot}{v.method}({args})"
     if isinstance(v, IndexAccess):
         return f"{_fmt_value(v.receiver)}[{_fmt_value(v.index)}]"
     raise ValueError(f"unknown value type: {type(v).__name__}")

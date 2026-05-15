@@ -175,6 +175,13 @@ follow these rules exactly. The parser is strict; deviations will fail.
         pair = [10, 20]
         a, b = pair                       # a=10, b=20
         lo, hi = minmax([3, 1, 4, 1, 5])  # unpack a [min, max] return
+38. **Optional chaining `?.`** — null-safe member access. `user?.name` returns
+    null/None if `user` is null; otherwise returns `user.name`. Compiles:
+      Python:  `(user.get("name") if user is not None else None)`   (dict-friendly)
+      JS:      `user?.name`                                          (native)
+        u = {name: "alice"}
+        p u?.name                          # "alice"
+        p u?.missing                       # None
 
 ## Verb categories (you may only use these verbs)
 

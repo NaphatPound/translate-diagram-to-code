@@ -131,10 +131,12 @@ class FString:
 @dataclass
 class MethodCall:
     """`receiver.method(args)` — produced by the postfix DOT chain in the
-    parser. `args` is None for plain attribute access (`receiver.member`)."""
+    parser. `args` is None for plain attribute access (`receiver.member`).
+    `optional` is True when `?.` was used: emit a null-safe access."""
     receiver: Value
     method: str
     args: Optional[List[Value]]
+    optional: bool = False
     kind: str = "methodcall"
 
 
@@ -329,6 +331,7 @@ TOKEN_SPEC = [
     ("OROP", r"\|\|"),
     ("ANDOP", r"&&"),
     ("NULLCOAL", r"\?\?"),
+    ("OPTDOT", r"\?\."),
     ("PIPE", r"\|"),
     ("QMARK", r"\?"),
     ("BANG", r"!"),
@@ -781,8 +784,8 @@ class _Parser:
             end, i = self._parse_primary(toks, i, line_no)
             v = Range(start=v, end=end)
             return v, i
-        # Postfix chain: `.name` / `.name(args)` / `[expr]`.
-        while i < len(toks) and toks[i].kind in ("DOT", "LBRACK"):
+        # Postfix chain: `.name` / `?.name` / `.name(args)` / `[expr]`.
+        while i < len(toks) and toks[i].kind in ("DOT", "OPTDOT", "LBRACK"):
             if toks[i].kind == "LBRACK":
                 i += 1
                 idx_expr, i = self._parse_expr(toks, i, line_no)
@@ -795,7 +798,8 @@ class _Parser:
                 i += 1
                 v = IndexAccess(receiver=v, index=idx_expr)
                 continue
-            # DOT
+            # DOT or OPTDOT
+            is_optional = toks[i].kind == "OPTDOT"
             i += 1
             if i >= len(toks) or toks[i].kind != "WORD" or not _is_ident(toks[i].value):
                 raise ParseError(
@@ -828,14 +832,17 @@ class _Parser:
                             f"expected ',' or ')' in method call, got {toks[i].value!r}",
                             toks[i].line, toks[i].col,
                         )
-                v = MethodCall(receiver=v, method=member, args=m_args)
+                v = MethodCall(receiver=v, method=member, args=m_args,
+                               optional=is_optional)
             else:
-                # Attribute access — extend Name path when receiver is a Name,
-                # otherwise wrap in MethodCall(args=None).
-                if isinstance(v, Name):
+                # Attribute access. Plain `.name` on a Name extends the path
+                # (so dotted barewords still work). With `?.name` we always
+                # use MethodCall to carry the optional flag.
+                if isinstance(v, Name) and not is_optional:
                     v = Name(parts=v.parts + [member])
                 else:
-                    v = MethodCall(receiver=v, method=member, args=None)
+                    v = MethodCall(receiver=v, method=member, args=None,
+                                   optional=is_optional)
         return v, i
 
     def _parse_primary(self, toks: List[Token], i: int, line_no: int) -> Tuple[Value, int]:

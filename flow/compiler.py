@@ -815,10 +815,29 @@ class _Compiler:
             return self._render_fstring(v)
         if isinstance(v, MethodCall):
             rec = self._render_value(v.receiver)
-            if v.args is None:
-                # Attribute access — `rec.member`.
+            args = (", ".join(self._render_value(a) for a in v.args)
+                    if v.args is not None else None)
+            if v.optional:
+                # Null-safe access.
+                if self.lang == "js":
+                    if args is None:
+                        return f"{rec}?.{v.method}"
+                    return f"{rec}?.{v.method}({args})"
+                if self.lang == "python":
+                    if args is None:
+                        # `?.member` → dict.get-style null-safe access. Works
+                        # for dicts (most Flow data); on objects the user can
+                        # use plain `.member` instead.
+                        key = self._str_literal(v.method)
+                        return f"({rec}.get({key}) if {rec} is not None else None)"
+                    return f"({rec}.{v.method}({args}) if {rec} is not None else None)"
+                # Go/Rust/Bash: best-effort fallback emits non-optional access
+                # plus a comment marker. Document the limitation.
+                if args is None:
+                    return f"{rec}.{v.method} /* ?. */"
+                return f"{rec}.{v.method}({args}) /* ?. */"
+            if args is None:
                 return f"{rec}.{v.method}"
-            args = ", ".join(self._render_value(a) for a in v.args)
             return f"{rec}.{v.method}({args})"
         if isinstance(v, IndexAccess):
             rec = self._render_value(v.receiver)
