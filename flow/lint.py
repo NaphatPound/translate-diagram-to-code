@@ -144,6 +144,21 @@ def _check_if(stmt: IfStmt, out: List[LintWarning]) -> None:
 
 
 def _check_call(call: Call, out: List[LintWarning]) -> None:
+    # Duplicate arg names. The compiler errors on this; lint surfaces it
+    # earlier with a clearer hint.
+    seen: dict = {}
+    for a in call.args:
+        if a.name in ("<pos>", "<pipe>"):
+            continue
+        seen[a.name] = seen.get(a.name, 0) + 1
+    for name, n in seen.items():
+        if n > 1:
+            out.append(LintWarning(
+                call.line,
+                f"verb {call.verb!r} has duplicate arg {name!r} ({n}×)",
+                f"keep only one `{name}=...` and drop the rest",
+            ))
+
     suggested = False
 
     # 1. Math verbs with -> name → assignment.

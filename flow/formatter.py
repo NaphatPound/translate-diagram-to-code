@@ -58,7 +58,12 @@ def _emit_stmt(stmt, depth: int, out: List[str], usage: dict) -> None:
         out.append(_INDENT * depth + _fmt_call(stmt))
         return
     if isinstance(stmt, AssignStmt):
-        out.append(f"{_INDENT * depth}{stmt.target} = {_fmt_value(stmt.value)}")
+        # Collapse `x = x op rhs` into compound `x op= rhs` when possible.
+        compound = _try_compound(stmt)
+        if compound:
+            out.append(_INDENT * depth + compound)
+        else:
+            out.append(f"{_INDENT * depth}{stmt.target} = {_fmt_value(stmt.value)}")
         return
     if isinstance(stmt, MultiAssignStmt):
         out.append(f"{_INDENT * depth}{', '.join(stmt.targets)} = {_fmt_value(stmt.value)}")
@@ -129,6 +134,20 @@ def _emit_stmt(stmt, depth: int, out: List[str], usage: dict) -> None:
 
 
 _PIPE_TEMP_RE = re.compile(r"^_p\d+$")
+
+_COMPOUND_OPS = {"+", "-", "*", "/", "%"}
+
+
+def _try_compound(stmt: AssignStmt) -> str:
+    """Return `x op= rhs` if the AssignStmt has shape `x = x op rhs`,
+    else empty string."""
+    v = stmt.value
+    if not isinstance(v, BinOp) or v.op not in _COMPOUND_OPS:
+        return ""
+    if not (isinstance(v.left, Name) and len(v.left.parts) == 1
+            and v.left.parts[0] == stmt.target):
+        return ""
+    return f"{stmt.target} {v.op}= {_fmt_value(v.right)}"
 
 
 def _try_pipe_chain(body, start: int, usage: dict) -> int:
