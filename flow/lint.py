@@ -260,9 +260,10 @@ def _check_def(stmt: DefStmt, out: List[LintWarning]) -> None:
 
 
 def _check_if(stmt: IfStmt, out: List[LintWarning]) -> None:
-    """`if !cond` with a MULTI-statement body → suggest `unless cond` block form.
-    Single-stmt bodies are indistinguishable from already-postfix-unless source,
-    so we don't suggest those (would produce false positives)."""
+    """Two if-related lints:
+      1. `if !cond` block (multi-stmt) → suggest `unless cond` block form.
+      2. Chain of 3+ if/elif `var == LIT` comparisons → suggest `match var`.
+    """
     cond = stmt.cond
     if (isinstance(cond, UnaryOp) and cond.op == "not"
             and stmt.else_ is None and len(stmt.then) >= 2):
@@ -272,6 +273,46 @@ def _check_if(stmt: IfStmt, out: List[LintWarning]) -> None:
             f"`if !{inner}` block can use `unless {inner}`",
             f"unless {inner}",
         ))
+
+    chain = _detect_if_chain(stmt)
+    if chain is not None:
+        var_name, depth = chain
+        out.append(LintWarning(
+            stmt.line,
+            f"chain of {depth} `if/elif {var_name} == ...` comparisons can be a `match` statement",
+            f"match {var_name}\n    case PAT\n      ...",
+        ))
+
+
+def _detect_if_chain(stmt: IfStmt):
+    """If `stmt` heads a chain of 3+ if/elif arms all of the form
+    `var == LITERAL` against the SAME var, return (var_name, depth);
+    else None."""
+    def extract(cond):
+        """Return (var_name, literal_value) or None."""
+        if not isinstance(cond, BinOp) or cond.op != "==":
+            return None
+        left, right = cond.left, cond.right
+        if isinstance(left, Name) and isinstance(right, (StringLit, NumberLit, BoolLit)):
+            return (".".join(left.parts), right)
+        if isinstance(right, Name) and isinstance(left, (StringLit, NumberLit, BoolLit)):
+            return (".".join(right.parts), left)
+        return None
+    first = extract(stmt.cond)
+    if first is None:
+        return None
+    var_name = first[0]
+    depth = 1
+    cur = stmt
+    while cur.else_ and len(cur.else_) == 1 and isinstance(cur.else_[0], IfStmt):
+        cur = cur.else_[0]
+        ex = extract(cur.cond)
+        if ex is None or ex[0] != var_name:
+            return None
+        depth += 1
+    if depth < 3:
+        return None
+    return (var_name, depth)
 
 
 # ---------- per-call checks ----------
