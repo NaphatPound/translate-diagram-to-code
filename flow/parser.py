@@ -282,6 +282,7 @@ TOKEN_SPEC = [
     ("DOTDOT", r"\.\."),
     ("OROP", r"\|\|"),
     ("ANDOP", r"&&"),
+    ("NULLCOAL", r"\?\?"),
     ("PIPE", r"\|"),
     ("QMARK", r"\?"),
     ("BANG", r"!"),
@@ -1094,6 +1095,7 @@ class _Parser:
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 _OP_PRECEDENCE = {
+    "??": 1,  # null-coalescing — lowest, paired with or
     "or":  1, "and": 2,
     "==": 3, "!=": 3, "<":  3, ">":  3, "<=": 3, ">=": 3,
     "+":  4, "-":  4,
@@ -1103,6 +1105,8 @@ _OP_PRECEDENCE = {
 
 def _op_from_token(tok: "Token") -> Optional[str]:
     """Return the canonical operator name for an operator-like token, or None."""
+    if tok.kind == "NULLCOAL":
+        return "??"
     if tok.kind == "ANDOP":
         return "and"
     if tok.kind == "OROP":

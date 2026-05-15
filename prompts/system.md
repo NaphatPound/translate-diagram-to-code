@@ -136,6 +136,15 @@ follow these rules exactly. The parser is strict; deviations will fail.
     `name = name op rhs`. Same chars as in Python/JS/C-family languages.
         total += 1
         scale *= 0.5
+32. **Slice with `a..b`** — using a range inside `[]` produces an inclusive
+    slice in the target language:
+        p s[0..4]      # "hello world" → "hello"
+        p xs[1..3]     # [10,20,30,40,50] → [20,30,40]
+        p xs[-1]       # negative index works (last element)
+33. **`??` null-coalescing** — `a ?? b` returns `a` if it's non-null,
+    otherwise `b`. Compiles to native `??` in JS/Rust, ternary in Python,
+    IIFE in Go, `${var:-default}` in Bash:
+        display = name ?? "anonymous"
 
 ## Verb categories (you may only use these verbs)
 

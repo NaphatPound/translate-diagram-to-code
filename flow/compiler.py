@@ -655,6 +655,19 @@ class _Compiler:
             l = self._render_value(v.left)
             r = self._render_value(v.right)
             op = v.op
+            if op == "??":
+                # Null-coalescing — render per target.
+                if self.lang == "python":
+                    return f"({l} if {l} is not None else {r})"
+                if self.lang in ("js", "rust"):
+                    return f"({l} ?? {r})"
+                if self.lang == "go":
+                    # No native; emit a function-call wrapper to keep semantics close.
+                    return f"func() any {{ if v := {l}; v != nil {{ return v }}; return {r} }}()"
+                if self.lang == "bash":
+                    # ${var:-default} substitutes when unset/empty.
+                    return f"${{{l.lstrip('$')}:-{r}}}"
+                raise CompileError(f"`??` not supported for {self.lang!r}")
             if op == "and":
                 op = "and" if self.lang == "python" else "&&"
             elif op == "or":
@@ -695,9 +708,23 @@ class _Compiler:
             return f"{rec}.{v.method}({args})"
         if isinstance(v, IndexAccess):
             rec = self._render_value(v.receiver)
+            # Slice: `s[a..b]` (inclusive). Detect Range index, emit native slice.
+            if isinstance(v.index, Range):
+                s_src = self._render_value(v.index.start)
+                e_src = self._render_value(v.index.end)
+                if self.lang == "python":
+                    return f"{rec}[{s_src}:({e_src}) + 1]"
+                if self.lang == "js":
+                    return f"({rec}).slice({s_src}, ({e_src}) + 1)"
+                if self.lang == "go":
+                    return f"{rec}[{s_src}:({e_src}) + 1]"
+                if self.lang == "rust":
+                    return f"&{rec}[{s_src}..=({e_src})]"
+                if self.lang == "bash":
+                    # Bash slice: ${var:offset:length}
+                    return f"${{{rec.lstrip('$')}:{s_src}:(({e_src}) - {s_src} + 1)}}"
             idx = self._render_value(v.index)
             if self.lang == "bash":
-                # Bash: arrays use ${arr[idx]}; assoc arrays similar. Best-effort.
                 return f"${{{rec.lstrip('$')}[{idx}]}}"
             return f"{rec}[{idx}]"
         if isinstance(v, Range):
