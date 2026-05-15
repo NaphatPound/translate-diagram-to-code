@@ -116,6 +116,19 @@ class Range:
 
 
 @dataclass
+class ListComp:
+    """Python-style list comprehension: `[expr for var in source]`
+    or `[expr for var in source if cond]`.
+
+    Lowered to a native comprehension/map per target language.
+    """
+    expr: Value
+    var: str
+    source: Value
+    cond: Optional[Value] = None
+
+
+@dataclass
 class Slice:
     """Python-style exclusive slice inside `[]`. Either bound may be None.
 
@@ -990,18 +1003,53 @@ class _Parser:
             return Name(parts), i + 1
         raise ParseError(f"expected a value, got {t.value!r}", t.line, t.col)
 
-    def _parse_list(self, toks: List[Token], i: int, line_no: int) -> Tuple[ListLit, int]:
+    def _parse_list(self, toks: List[Token], i: int, line_no: int):
         i += 1  # consume '['
         items: List[Value] = []
         if i < len(toks) and toks[i].kind == "RBRACK":
             return ListLit(items), i + 1
+        first_val, i = self._parse_value_maybe_spread(toks, i, line_no)
+        # Comprehension detection: `[EXPR for VAR in SOURCE (if COND)?]`.
+        # `for` is a soft keyword here — only triggers inside brackets.
+        if (i < len(toks) and toks[i].kind == "WORD"
+                and toks[i].value == "for"):
+            i += 1
+            if i >= len(toks) or toks[i].kind != "WORD" or not _is_ident(toks[i].value):
+                raise ParseError(
+                    "list comprehension: expected variable name after 'for'",
+                    toks[i].line if i < len(toks) else line_no,
+                    toks[i].col if i < len(toks) else 1,
+                )
+            var = toks[i].value
+            i += 1
+            if i >= len(toks) or toks[i].kind != "KW_IN":
+                raise ParseError(
+                    "list comprehension: expected 'in' after the variable",
+                    toks[i].line if i < len(toks) else line_no,
+                    toks[i].col if i < len(toks) else 1,
+                )
+            i += 1
+            source, i = self._parse_expr(toks, i, line_no)
+            cond: Optional[Value] = None
+            if i < len(toks) and toks[i].kind == "KW_IF":
+                i += 1
+                cond, i = self._parse_expr(toks, i, line_no)
+            if i >= len(toks) or toks[i].kind != "RBRACK":
+                raise ParseError(
+                    "expected ']' to close list comprehension",
+                    toks[i].line if i < len(toks) else line_no,
+                    toks[i].col if i < len(toks) else 1,
+                )
+            return ListComp(expr=first_val, var=var, source=source, cond=cond), i + 1
+        items.append(first_val)
+        # Otherwise continue as a regular list literal.
         while True:
-            val, i = self._parse_value_maybe_spread(toks, i, line_no)
-            items.append(val)
             if i >= len(toks):
                 raise ParseError("expected ']' to close list", line_no, 1)
             if toks[i].kind == "COMMA":
                 i += 1
+                val, i = self._parse_value_maybe_spread(toks, i, line_no)
+                items.append(val)
                 continue
             if toks[i].kind == "RBRACK":
                 return ListLit(items), i + 1

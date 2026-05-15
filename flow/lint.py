@@ -25,7 +25,7 @@ from .parser import (
     WhenStmt, DefStmt, ReturnStmt, BreakStmt, ContinueStmt, TryStmt, WhileStmt, ExprStmt,
     MatchStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, ListLit, DictLit,
-    Ternary, Range, Slice, FString, MethodCall, IndexAccess, Spread,
+    Ternary, Range, Slice, ListComp, FString, MethodCall, IndexAccess, Spread,
 )
 from .verbs import VERBS
 
@@ -166,6 +166,9 @@ def _count_all_names(body) -> dict:
         elif isinstance(v, Slice):
             if v.start is not None: in_value(v.start)
             if v.end is not None: in_value(v.end)
+        elif isinstance(v, ListComp):
+            in_value(v.expr); in_value(v.source)
+            if v.cond is not None: in_value(v.cond)
         elif isinstance(v, FString):
             for part in v.parts:
                 if part[0] == "expr":

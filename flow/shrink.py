@@ -34,7 +34,7 @@ from .parser import (
     Program, Call, AssignStmt, MultiAssignStmt, IfStmt, EachStmt, RepeatStmt, WhileStmt, WhenStmt, TryStmt,
     DefStmt, ReturnStmt, ExprStmt, MatchStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, ListLit, DictLit,
-    Ternary, Range, Slice, FString, MethodCall, IndexAccess, Spread, Arg,
+    Ternary, Range, Slice, ListComp, FString, MethodCall, IndexAccess, Spread, Arg,
 )
 from .formatter import format_source
 
@@ -244,6 +244,13 @@ def _simplify_value(v):
         return Slice(
             start=None if v.start is None else _simplify_value(v.start),
             end=None if v.end is None else _simplify_value(v.end),
+        )
+    if isinstance(v, ListComp):
+        return ListComp(
+            expr=_simplify_value(v.expr),
+            var=v.var,
+            source=_simplify_value(v.source),
+            cond=None if v.cond is None else _simplify_value(v.cond),
         )
     if isinstance(v, FString):
         new_parts = []
@@ -661,6 +668,11 @@ def _count_in_value(value, counts) -> None:
             _count_in_value(value.start, counts)
         if value.end is not None:
             _count_in_value(value.end, counts)
+    elif isinstance(value, ListComp):
+        _count_in_value(value.expr, counts)
+        _count_in_value(value.source, counts)
+        if value.cond is not None:
+            _count_in_value(value.cond, counts)
     elif isinstance(value, ListLit):
         for x in value.items:
             _count_in_value(x, counts)
@@ -757,6 +769,16 @@ def _replace_value(value, inlines, _expanding=None):
                    else _replace_value(value.start, inlines, _expanding)),
             end=(None if value.end is None
                  else _replace_value(value.end, inlines, _expanding)),
+        )
+    if isinstance(value, ListComp):
+        # The bound var shadows any outer inline of the same name.
+        inner = {k: v for k, v in inlines.items() if k != value.var}
+        return ListComp(
+            expr=_replace_value(value.expr, inner, _expanding),
+            var=value.var,
+            source=_replace_value(value.source, inlines, _expanding),
+            cond=(None if value.cond is None
+                  else _replace_value(value.cond, inner, _expanding)),
         )
     if isinstance(value, ListLit):
         return ListLit([_replace_value(x, inlines, _expanding) for x in value.items])
