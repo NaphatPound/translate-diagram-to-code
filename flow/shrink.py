@@ -178,14 +178,22 @@ def _inline_single_use(program: Program) -> Program:
     Only inlines when `expr` is a *safe* value: literals, names, simple
     arithmetic, ternaries, or pure-builtin function calls. Skips RHS that
     might have side effects (most FuncCalls).
+
+    Names that are shadowed by a def's param (e.g. outer `x` and `def f x`)
+    are NOT inlined — the param-binding makes the inner reference semantically
+    different from the outer one.
     """
     counts: dict = {}
     _count_in_body(program.body, counts)
+
+    shadowed = _shadowed_names(program.body)
 
     # Collect single-use assignments with safe RHS.
     inlines: dict = {}
     for stmt in _walk_all(program.body):
         if isinstance(stmt, AssignStmt) and counts.get(stmt.target, 0) == 1:
+            if stmt.target in shadowed:
+                continue
             if _is_safe_to_inline(stmt.value):
                 inlines[stmt.target] = stmt.value
 
@@ -194,6 +202,41 @@ def _inline_single_use(program: Program) -> Program:
 
     program.body = _replace_and_drop(program.body, inlines)
     return program
+
+
+def _shadowed_names(body) -> set:
+    """Return the set of names shadowed by a def's param or each-loop var
+    somewhere in the program. Conservative: a name is shadowed even if
+    only one def in the program has it as a param."""
+    shadowed: set = set()
+    def walk(stmts):
+        for s in stmts:
+            if isinstance(s, DefStmt):
+                for n, _d in s.params:
+                    shadowed.add(n)
+                walk(s.body)
+            elif isinstance(s, EachStmt):
+                shadowed.add(s.var)
+                if s.key_var:
+                    shadowed.add(s.key_var)
+                walk(s.body)
+            elif isinstance(s, RepeatStmt):
+                if s.var:
+                    shadowed.add(s.var)
+                walk(s.body)
+            elif isinstance(s, IfStmt):
+                walk(s.then)
+                if s.else_:
+                    walk(s.else_)
+            elif isinstance(s, (WhileStmt, WhenStmt)):
+                walk(s.body)
+            elif isinstance(s, TryStmt):
+                if s.catch_var:
+                    shadowed.add(s.catch_var)
+                walk(s.try_body)
+                walk(s.catch_body)
+    walk(body)
+    return shadowed
 
 
 def _walk_all(body):

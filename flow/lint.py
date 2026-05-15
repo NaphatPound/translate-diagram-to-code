@@ -374,6 +374,17 @@ def cli_main(args) -> None:
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(2)
 
+    # --fix: apply automated rewrites via shrink. Idiomatic for codemod tools.
+    if getattr(args, "fix", False):
+        from .shrink import shrink_source
+        out = shrink_source(src)
+        if getattr(args, "write", False):
+            Path(args.file).write_text(out, encoding="utf-8")
+            print(f"wrote {args.file}", file=sys.stderr)
+        else:
+            sys.stdout.write(out)
+        return
+
     warnings = lint_program(program)
     if not warnings:
         print("no lint warnings")

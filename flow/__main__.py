@@ -45,14 +45,34 @@ def cmd_compile(args):
 
 
 def cmd_check(args):
+    """Run parse + compile + lint + shrink as a one-stop diagnostic.
+
+    Quiet by default — exits 0 on success with a small status block. With
+    --verbose, also lists each lint warning.
+    """
+    from .lint import lint_source
+    from .shrink import shrink_source
     src = _read(args.file)
     try:
         ast = parse(src)
         compile_to(ast, "python")
     except (ParseError, CompileError) as e:
-        print(f"ERROR: {e}", file=sys.stderr)
+        print(f"[parse/compile] FAIL: {e}", file=sys.stderr)
         sys.exit(2)
-    print("ok")
+
+    warnings = lint_source(src)
+    shrunk = shrink_source(src)
+    save_pct = (1 - len(shrunk) / len(src)) * 100 if src else 0
+
+    print(f"[parse]   ok")
+    print(f"[compile] ok (python)")
+    print(f"[lint]    {len(warnings)} suggestion{'s' if len(warnings) != 1 else ''}")
+    print(f"[shrink]  {len(src):>5} → {len(shrunk):<5} chars  ({save_pct:+.1f}%)")
+    if args.verbose and warnings:
+        print()
+        for w in warnings:
+            print(f"  line {w.line}: {w.message}")
+            print(f"    → {w.suggestion}")
 
 
 def cmd_fmt(args):
@@ -235,8 +255,10 @@ def main():
     pc.add_argument("--to", choices=["python", "js", "go", "rust", "bash"], default="python")
     pc.set_defaults(func=cmd_compile)
 
-    pk = sub.add_parser("check", help="parse + compile silently")
+    pk = sub.add_parser("check", help="one-stop diagnostic: parse + compile + lint + shrink stats")
     pk.add_argument("file")
+    pk.add_argument("-v", "--verbose", action="store_true",
+                    help="also list each lint suggestion")
     pk.set_defaults(func=cmd_check)
 
     pf = sub.add_parser("fmt", help="reformat Flow source canonically")
@@ -281,6 +303,10 @@ def main():
     pl = sub.add_parser("lint", help="report verbose Flow patterns with shorter equivalents")
     pl.add_argument("file")
     pl.add_argument("--fail", action="store_true", help="exit 1 if any warnings")
+    pl.add_argument("--fix", action="store_true",
+                    help="apply automated rewrites (delegates to `flow shrink`)")
+    pl.add_argument("-w", "--write", action="store_true",
+                    help="with --fix, overwrite the file in place")
     pl.set_defaults(func=cmd_lint)
 
     psh = sub.add_parser("shrink", help="rewrite Flow source to the shortest equivalent form")
