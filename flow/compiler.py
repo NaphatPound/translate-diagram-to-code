@@ -973,6 +973,14 @@ class _Compiler:
                 # Go / Bash have no clean one-liner; emit Python-style and
                 # let the target-specific user adapt.
                 return f"({l} in {r})"
+            elif op == "not in":
+                if self.lang == "python":
+                    return f"({l} not in {r})"
+                if self.lang == "js":
+                    return f"(!({r}).includes({l}))"
+                if self.lang == "rust":
+                    return f"(!({r}).contains(&{l}))"
+                return f"({l} not in {r})"
             return f"({l} {op} {r})"
         if isinstance(v, UnaryOp):
             inner = self._render_value(v.value)

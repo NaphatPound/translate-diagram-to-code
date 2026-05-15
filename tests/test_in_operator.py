@@ -51,6 +51,40 @@ class TestInOperator(unittest.TestCase):
         self.assertEqual(out, "False")
 
 
+class TestNotInOperator(unittest.TestCase):
+    """`not in` parses as a two-token binop and compiles idiomatically."""
+
+    def test_not_in_list_true(self):
+        self.assertEqual(_run('p ("z" not in ["a", "b"])'), "True")
+
+    def test_not_in_list_false(self):
+        self.assertEqual(_run('p ("a" not in ["a", "b"])'), "False")
+
+    def test_not_in_string(self):
+        self.assertEqual(_run('p ("xyz" not in "hello")'), "True")
+
+    def test_not_in_in_if(self):
+        out = _run("if 5 not in [1, 2, 3]\n  p \"missing\"")
+        self.assertEqual(out, "missing")
+
+    def test_python_emits_not_in_directly(self):
+        py = compile_to(parse('p ("a" not in xs)'), "python")
+        self.assertIn(" not in ", py)
+        self.assertNotIn("(not (", py)  # didn't fall back to `not (a in xs)`
+
+    def test_simplifier_folds_negated_in(self):
+        from flow.shrink import shrink_source
+        # `!(x in xs)` should fold to `x not in xs`.
+        out = shrink_source('x = "z"\np !(x in ["a", "b"])\np x')
+        self.assertIn("not in", out)
+        self.assertNotIn("!(", out)
+
+    def test_js_emits_negated_includes(self):
+        js = compile_to(parse('p ("a" not in xs)'), "js")
+        self.assertIn(".includes(", js)
+        self.assertIn("!", js)
+
+
 class TestInOperatorJS(unittest.TestCase):
     """Smoke test: JS path renders `.includes()`."""
 

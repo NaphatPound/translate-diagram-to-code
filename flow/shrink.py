@@ -65,6 +65,8 @@ INVERTED_CMP = {
     "<=": ">",
     ">":  "<=",
     ">=": "<",
+    "in":     "not in",
+    "not in": "in",
 }
 
 # FuncCalls considered safe to inline (no side effects, deterministic).

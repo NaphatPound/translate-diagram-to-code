@@ -1057,6 +1057,17 @@ class _Parser:
         left, i = self._parse_value(toks, i, line_no)
         while i < len(toks):
             op_tok = toks[i]
+            # Two-token operators: `not in`.
+            if (op_tok.kind == "KW_NOT"
+                    and i + 1 < len(toks)
+                    and toks[i + 1].kind == "KW_IN"):
+                prec = _OP_PRECEDENCE["not in"]
+                if prec < min_prec:
+                    break
+                i += 2
+                right, i = self._parse_expr(toks, i, line_no, prec + 1)
+                left = BinOp("not in", left, right)
+                continue
             op = _op_from_token(op_tok)
             if op is None:
                 break
@@ -1467,7 +1478,8 @@ def _looks_like_multi_assign(toks) -> bool:
 _OP_PRECEDENCE = {
     "??": 1,  # null-coalescing — lowest, paired with or
     "or":  1, "and": 2,
-    "==": 3, "!=": 3, "<":  3, ">":  3, "<=": 3, ">=": 3, "in": 3,
+    "==": 3, "!=": 3, "<":  3, ">":  3, "<=": 3, ">=": 3,
+    "in": 3, "not in": 3,
     "+":  4, "-":  4,
     "*":  5, "/":  5, "%":  5,
 }

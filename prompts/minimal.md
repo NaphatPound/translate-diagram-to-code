@@ -27,7 +27,7 @@ Output Flow source only. No prose, fences, or commentary.
 
 ## Expressions
 - Operators: `+ - * / %`, `== != < > <= >=`, `and/&&`, `or/||`, `not/!`,
-  `x in xs` (membership), `cond ? a : b`, `a ?? b`, `a?.b`.
+  `x in xs` / `x not in xs` (membership), `cond ? a : b`, `a ?? b`, `a?.b`.
 - Member: `obj.attr`, `obj["k"]`, `arr[i]`, `arr[a..b]` (slice), `s.method(args)`.
 - Spread: `*xs` inside lists / funccall args.
 
