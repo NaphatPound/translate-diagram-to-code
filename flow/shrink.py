@@ -84,7 +84,73 @@ def shrink(program: Program) -> Program:
     program.body = _simplify_in_body(program.body)
     program.body = _shrink_block(program.body)
     program = _inline_single_use(program)
+    _coalesce_user_temps(program)
     return program
+
+
+# ============================================================
+# Pipe-coalesce: rename single-use Call.out names to _pN so the
+# formatter recognizes them as pipe chains.
+# ============================================================
+
+import re as _re
+_PIPE_TEMP_RE = _re.compile(r"^_p\d+$")
+
+
+def _coalesce_user_temps(program: Program) -> None:
+    """Rewrite user-named temps that flow as a single arg into the next
+    Call so the formatter coalesces them into pipe chains.
+
+    Example AST in:
+      Call(filter, [from=xs, where="x > 0"], out=ys)
+      Call(map,    [from=ys, to="x * 2"],    out=zs)
+      Call(print,  [<pos>=Name(zs)],         out=None)
+
+    Each of ys/zs used exactly once → rename to _p1/_p2. Formatter
+    then emits `xs | filter where="x > 0" | map to="x * 2" | p`.
+    """
+    counts: dict = {}
+    _count_in_body(program.body, counts)
+
+    # Start the fresh-name counter above any existing _pN to avoid collisions.
+    existing = []
+    for stmt in program.body:
+        if isinstance(stmt, Call) and stmt.out and _PIPE_TEMP_RE.match(stmt.out):
+            existing.append(int(stmt.out[2:]))
+    next_id = max(existing, default=0) + 1
+    renames: dict = {}
+
+    for i in range(len(program.body) - 1):
+        cur = program.body[i]
+        nxt = program.body[i + 1]
+        if not (isinstance(cur, Call) and cur.out and isinstance(nxt, Call)):
+            continue
+        if counts.get(cur.out, 0) != 1:
+            continue
+        if _PIPE_TEMP_RE.match(cur.out):
+            continue
+        matching = [a for a in nxt.args
+                    if isinstance(a.value, Name)
+                    and len(a.value.parts) == 1
+                    and a.value.parts[0] == cur.out]
+        if len(matching) != 1:
+            continue
+        renames[cur.out] = f"_p{next_id}"
+        next_id += 1
+
+    if not renames:
+        return
+
+    for stmt in program.body:
+        if not isinstance(stmt, Call):
+            continue
+        if stmt.out and stmt.out in renames:
+            stmt.out = renames[stmt.out]
+        for a in stmt.args:
+            if (isinstance(a.value, Name)
+                    and len(a.value.parts) == 1
+                    and a.value.parts[0] in renames):
+                a.value = Name([renames[a.value.parts[0]]])
 
 
 # ============================================================

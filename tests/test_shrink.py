@@ -298,6 +298,48 @@ class TestNegationSimplify(unittest.TestCase):
         self.assertTrue(_semantically_same(before, shrink_source(before)))
 
 
+class TestPipeCoalesce(unittest.TestCase):
+    """Single-use user-named Call.out names should rename to _pN so the
+    formatter emits a pipe chain."""
+
+    def test_two_step_chain_collapses(self):
+        before = (
+            'xs = [1, 2, 3]\n'
+            'filter from=xs where="x > 1" -> ys\n'
+            'map from=ys to="x * 10" -> zs\n'
+            'p zs'
+        )
+        out = shrink_source(before)
+        self.assertIn(" | ", out)
+        # No standalone `-> ys` or `-> zs` left.
+        self.assertNotIn(" ys", out)
+        self.assertNotIn(" zs", out)
+        # Semantics preserved.
+        self.assertTrue(_semantically_same(before, out))
+
+    def test_used_twice_does_not_coalesce(self):
+        # `ys` used twice → must stay as an assignment.
+        before = (
+            'xs = [1, 2, 3]\n'
+            'filter from=xs where="x > 1" -> ys\n'
+            'p ys\n'
+            'p ys'
+        )
+        out = shrink_source(before)
+        self.assertIn("-> ys", out)
+
+    def test_nonadjacent_use_does_not_coalesce(self):
+        # ys is used once but not in the immediately next stmt.
+        before = (
+            'filter from=[1,2,3] where="x > 1" -> ys\n'
+            'p "header"\n'
+            'p ys'
+        )
+        out = shrink_source(before)
+        # Don't pipe — header is in the way.
+        self.assertNotIn(" | ", out)
+
+
 class TestNoOpOnCompactInput(unittest.TestCase):
 
     def test_already_compact_unchanged_semantically(self):
