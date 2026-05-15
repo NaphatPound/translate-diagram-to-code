@@ -313,10 +313,12 @@ class _Compiler:
         # rather than string-literal barewords.
         self.scope.add(stmt.name)
         # Implicit return at compile time: if the last stmt of the body is a
-        # bare expression (ExprStmt), wrap it as a return when we emit it.
+        # bare expression (ExprStmt), wrap it as a return. Recursively descend
+        # into IfStmt branches and MatchStmt cases so each terminal branch's
+        # last bare expression becomes a return too.
         body = list(stmt.body)
-        if body and isinstance(body[-1], ExprStmt):
-            body[-1] = ReturnStmt(value=body[-1].value, line=body[-1].line)
+        if body:
+            body[-1] = _wrap_terminal_returns(body[-1])
         self._block_open()
         for s in body:
             self.emit_stmt(s)
@@ -1078,6 +1080,40 @@ class _Compiler:
 def _pairs_by_name(args: List[Arg]):
     for a in args:
         yield a.name, a
+
+
+def _wrap_terminal_returns(stmt):
+    """If `stmt` is a bare ExprStmt, wrap as ReturnStmt. If it's an IfStmt
+    or MatchStmt, recurse into each branch's LAST statement and apply the
+    same wrap so implicit return works inside conditional / match arms.
+
+    Also: a bare `Call(verb, [], None)` whose verb is NOT a registered Flow
+    verb is reinterpreted as a variable reference and implicit-returned.
+    This makes `def abs n: ... else: n` work — without it, `n` parses as a
+    zero-arg verb call which the compiler rejects.
+    """
+    if isinstance(stmt, ExprStmt):
+        return ReturnStmt(value=stmt.value, line=stmt.line)
+    if isinstance(stmt, Call) and not stmt.args and stmt.out is None:
+        if stmt.verb not in VERBS:
+            return ReturnStmt(value=Name([stmt.verb]), line=stmt.line)
+    if isinstance(stmt, IfStmt):
+        if stmt.then:
+            stmt.then[-1] = _wrap_terminal_returns(stmt.then[-1])
+        if stmt.else_:
+            stmt.else_[-1] = _wrap_terminal_returns(stmt.else_[-1])
+        return stmt
+    if isinstance(stmt, MatchStmt):
+        new_cases = []
+        for pat, body in stmt.cases:
+            if body:
+                body[-1] = _wrap_terminal_returns(body[-1])
+            new_cases.append((pat, body))
+        stmt.cases = new_cases
+        if stmt.else_body:
+            stmt.else_body[-1] = _wrap_terminal_returns(stmt.else_body[-1])
+        return stmt
+    return stmt
 
 
 def _escape_for_fstring(text: str, lang: str) -> str:

@@ -24,7 +24,9 @@ fences, no commentary. The parser is strict.
                        `match value / case PAT / else` (literal patterns)
 - Postfix:             `X if cond`, `X unless cond`
 - Def + call:          `def name p1 p2=default` (body), `name(args)`
-- Implicit return:     a `def` body's last bare expression auto-returns
+- Implicit return:     a `def` body's last bare expression auto-returns;
+                       inside terminal `if/else` and `match/case/else`
+                       arms, each arm's last bare expr auto-returns too
 
 ## Expressions
 
