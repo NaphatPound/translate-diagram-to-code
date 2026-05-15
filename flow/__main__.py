@@ -372,6 +372,8 @@ def main():
                     help="prompt mode: full (~5K chars) or minimal (~1.7K) for tiny LLMs")
     pg.add_argument("--rounds", type=int, default=1,
                     help="best-of-N sampling: generate N candidates, return the shortest valid one")
+    pg.add_argument("--cache", action="store_true",
+                    help="reuse identical request results from ~/.flow/gen_cache.json")
     pg.set_defaults(func=cmd_gen)
 
     pv = sub.add_parser("review", help="compile + run + ask a big LLM to judge correctness")

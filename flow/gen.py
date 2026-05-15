@@ -40,6 +40,38 @@ DEFAULT_ENDPOINT = os.environ.get("FLOW_LLM_ENDPOINT", "http://localhost:11434/v
 DEFAULT_MODEL    = os.environ.get("FLOW_LLM_MODEL",    "llama3.2")
 DEFAULT_KEY      = os.environ.get("FLOW_LLM_KEY",      "")  # often empty for local
 
+# ---------- on-disk cache (opt-in) ----------
+
+
+def _cache_path():
+    """Per-user JSON cache for `flow gen --cache`."""
+    return Path.home() / ".flow" / "gen_cache.json"
+
+
+def _cache_key(request: str, prompt: str, retries: int, polish: bool, rounds: int) -> str:
+    """Stable hash of every input that affects the output."""
+    import hashlib
+    parts = f"{request}\x00{prompt}\x00{retries}\x00{int(polish)}\x00{rounds}"
+    return hashlib.sha256(parts.encode("utf-8")).hexdigest()[:16]
+
+
+def _cache_load() -> dict:
+    p = _cache_path()
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _cache_save(data: dict) -> None:
+    p = _cache_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(p)
+
 _HERE = Path(__file__).resolve().parent.parent
 _PROMPTS = _HERE / "prompts"
 
@@ -141,6 +173,7 @@ def generate(
     polish: bool = True,
     prompt: str = "full",
     rounds: int = 1,
+    cache: bool = False,
 ) -> str:
     """Generate Flow code from a natural-language request, with self-correction.
 
@@ -155,12 +188,28 @@ def generate(
 
     When `polish` is True (default), after each successful candidate we run
     `flow.shrink` (deterministic) to compact the output.
+
+    `cache` (default False) reuses validated outputs stored on disk at
+    `~/.flow/gen_cache.json` — identical requests skip the LLM entirely.
     """
+    cache_key = None
+    if cache:
+        cache_key = _cache_key(request, prompt, retries, polish, rounds)
+        cached = _cache_load().get(cache_key)
+        if cached is not None:
+            if verbose:
+                print(f"--- cache hit {cache_key} ---", file=sys.stderr)
+            return cached
     if rounds > 1:
-        return _generate_best_of_n(
+        out = _generate_best_of_n(
             request, cfg=cfg, retries=retries, verbose=verbose,
             polish=polish, prompt=prompt, rounds=rounds,
         )
+        if cache:
+            data = _cache_load()
+            data[cache_key] = out
+            _cache_save(data)
+        return out
     cfg = cfg or LLMConfig()
     messages = _build_messages(request, prompt=prompt)
 
@@ -204,20 +253,25 @@ def generate(
 
     assert code is not None  # we broke out of the loop above
     if not polish:
-        return code
-
-    # Polish pass: deterministic shrink (no extra LLM call). Falls back to the
-    # validated-but-verbose original if anything goes wrong.
-    try:
-        from .shrink import shrink_source
-        polished = shrink_source(code)
-        # Re-validate just to be paranoid.
-        compile_to(parse(polished), "python")
-        if verbose and polished != code:
-            print("--- polished by flow.shrink ---", file=sys.stderr)
-        return polished
-    except (ParseError, CompileError, Exception):
-        return code
+        result = code
+    else:
+        # Polish pass: deterministic shrink (no extra LLM call). Falls back to
+        # the validated-but-verbose original if anything goes wrong.
+        try:
+            from .shrink import shrink_source
+            polished = shrink_source(code)
+            # Re-validate just to be paranoid.
+            compile_to(parse(polished), "python")
+            if verbose and polished != code:
+                print("--- polished by flow.shrink ---", file=sys.stderr)
+            result = polished
+        except (ParseError, CompileError, Exception):
+            result = code
+    if cache and cache_key:
+        data = _cache_load()
+        data[cache_key] = result
+        _cache_save(data)
+    return result
 
 
 def _generate_best_of_n(
@@ -281,6 +335,7 @@ def cli_main(args) -> None:
             polish=not getattr(args, "no_lint", False),
             prompt=getattr(args, "prompt", "full"),
             rounds=getattr(args, "rounds", 1),
+            cache=getattr(args, "cache", False),
         )
     except LLMError as e:
         print(f"ERROR: {e}", file=sys.stderr)
