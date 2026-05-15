@@ -22,6 +22,7 @@ from typing import List, Optional
 from . import parse, ParseError
 from .parser import (
     Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhenStmt,
+    DefStmt, ReturnStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, ListLit, DictLit,
 )
 from .verbs import VERBS
@@ -78,6 +79,24 @@ def _walk(stmt, out: List[LintWarning]) -> None:
     elif isinstance(stmt, (EachStmt, RepeatStmt, WhenStmt)):
         for s in stmt.body:
             _walk(s, out)
+    elif isinstance(stmt, DefStmt):
+        _check_def(stmt, out)
+        for s in stmt.body:
+            _walk(s, out)
+
+
+def _check_def(stmt: DefStmt, out: List[LintWarning]) -> None:
+    """Suggest implicit return for `def`s whose last stmt is `return VALUE`."""
+    if not stmt.body:
+        return
+    last = stmt.body[-1]
+    if isinstance(last, ReturnStmt) and last.value is not None:
+        rhs = _value_to_src(last.value)
+        out.append(LintWarning(
+            last.line,
+            f"`return` at end of def {stmt.name!r} can be implicit",
+            rhs,
+        ))
 
 
 def _check_if(stmt: IfStmt, out: List[LintWarning]) -> None:
@@ -156,26 +175,15 @@ def _arg_src(call: Call, name: str) -> Optional[str]:
 
 
 def _value_to_src(v) -> str:
-    """Render a value back to Flow source — best effort, lint-display only."""
-    import json
-    if isinstance(v, StringLit):
-        return json.dumps(v.value, ensure_ascii=False)
-    if isinstance(v, NumberLit):
-        return str(int(v.value)) if v.value.is_integer() else str(v.value)
-    if isinstance(v, BoolLit):
-        return "true" if v.value else "false"
-    if isinstance(v, Name):
-        return ".".join(v.parts)
-    if isinstance(v, FuncCall):
-        return f"{v.name}({', '.join(_value_to_src(a) for a in v.args)})"
-    if isinstance(v, BinOp):
-        return f"{_value_to_src(v.left)} {v.op} {_value_to_src(v.right)}"
-    if isinstance(v, ListLit):
-        return f"[{', '.join(_value_to_src(x) for x in v.items)}]"
-    if isinstance(v, DictLit):
-        items = ", ".join(f"{k}: {_value_to_src(val)}" for k, val in v.entries)
-        return "{" + items + "}"
-    return "<?>"
+    """Render a value back to Flow source — best effort, lint-display only.
+
+    Delegates to the formatter to avoid re-implementing every value shape.
+    """
+    try:
+        from .formatter import _fmt_value
+        return _fmt_value(v)
+    except Exception:
+        return "<?>"
 
 
 # ---------- CLI ----------

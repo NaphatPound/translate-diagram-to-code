@@ -1141,11 +1141,10 @@ class _Parser:
             params.append((pname, default))
         self.idx += 1
         body, _ = self._parse_block(base_indent + 1)
-        # Implicit return: if the last statement is a bare expression, wrap
-        # it as ReturnStmt so callers get the value back without writing
-        # `return` explicitly.
-        if body and isinstance(body[-1], ExprStmt):
-            body[-1] = ReturnStmt(value=body[-1].value, line=body[-1].line)
+        # Implicit return is handled at compile time, NOT at parse time, so
+        # the AST preserves whether the user wrote `return` explicitly. That
+        # lets lint distinguish "you already have implicit return" from "you
+        # could drop your explicit return".
         return DefStmt(name=name, params=params, body=body, line=line.line_no)
 
     def _parse_return(self, line: _Line) -> ReturnStmt:

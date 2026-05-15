@@ -86,6 +86,13 @@ def _shrink_block(body):
             continue
         if isinstance(stmt, DefStmt):
             stmt.body = _shrink_block(stmt.body)
+            # Implicit return: drop `return` from the def's last stmt so the
+            # formatter emits the bare expression. Parser re-wraps on round-trip.
+            if (stmt.body
+                    and isinstance(stmt.body[-1], ReturnStmt)
+                    and stmt.body[-1].value is not None):
+                last = stmt.body[-1]
+                stmt.body[-1] = ExprStmt(value=last.value, line=last.line)
             new.append(stmt)
             i += 1
             continue

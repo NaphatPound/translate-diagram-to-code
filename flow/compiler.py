@@ -236,8 +236,13 @@ class _Compiler:
         # Also register the function name so calls to it parse as variable refs
         # rather than string-literal barewords.
         self.scope.add(stmt.name)
+        # Implicit return at compile time: if the last stmt of the body is a
+        # bare expression (ExprStmt), wrap it as a return when we emit it.
+        body = list(stmt.body)
+        if body and isinstance(body[-1], ExprStmt):
+            body[-1] = ReturnStmt(value=body[-1].value, line=body[-1].line)
         self._block_open()
-        for s in stmt.body:
+        for s in body:
             self.emit_stmt(s)
         # Restore scope (but keep the function name).
         self.scope = prev_scope
