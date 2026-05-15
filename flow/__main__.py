@@ -109,6 +109,53 @@ def cmd_shrink(args):
         sys.stdout.write(out)
 
 
+def cmd_stats(args):
+    """Show char count, statement breakdown, and shrink potential for a file."""
+    from .shrink import shrink_source
+    src = _read(args.file)
+    try:
+        program = parse(src)
+        shrunk = shrink_source(src)
+    except ParseError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(2)
+
+    counts = _stats_count_features(program.body)
+
+    src_chars = len(src)
+    shrunk_chars = len(shrunk)
+    saving = ((src_chars - shrunk_chars) / src_chars * 100) if src_chars else 0
+    src_lines = len([l for l in src.splitlines() if l.strip() and not l.strip().startswith("#")])
+
+    print(f"file:          {args.file}")
+    print(f"chars:         {src_chars}")
+    print(f"chars (shrunk):{shrunk_chars:>5}  ({saving:+.1f}%)")
+    print(f"code lines:    {src_lines}")
+    print(f"stmt total:    {sum(counts.values())}")
+    if not counts:
+        return
+    print()
+    print("statements by type:")
+    for name, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])):
+        print(f"  {name:18}  {n}")
+
+
+def _stats_count_features(body):
+    counts: dict = {}
+    def bump(name):
+        counts[name] = counts.get(name, 0) + 1
+    def walk(stmts):
+        for s in stmts:
+            kind = type(s).__name__
+            bump(kind)
+            for attr in ("body", "then", "else_", "try_body", "catch_body"):
+                child = getattr(s, attr, None)
+                if isinstance(child, list):
+                    walk(child)
+    walk(body)
+    return counts
+
+
 def cmd_examples(args):
     """Print curated example .flow programs. `--list` shows names + summaries,
     otherwise `--all` dumps every example, or `<name>` prints one example."""
@@ -247,6 +294,10 @@ def main():
     pe.add_argument("--list", action="store_true",
                     help="list example names + one-line summaries")
     pe.set_defaults(func=cmd_examples)
+
+    pst = sub.add_parser("stats", help="report char count, statement counts, and shrink potential")
+    pst.add_argument("file")
+    pst.set_defaults(func=cmd_stats)
 
     args = p.parse_args()
     args.func(args)
