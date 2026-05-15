@@ -1411,8 +1411,55 @@ def _parse_fstring(content: str, line: int, col: int) -> "FString":
 
 def parse(src: str) -> Program:
     """Parse Flow source into an AST. Raises ParseError on failure."""
+    src = _preprocess_triple_strings(src)
     lines = _split_lines(src)
     return _Parser(lines).parse_program()
+
+
+def _preprocess_triple_strings(src: str) -> str:
+    # Convert triple-quoted strings (possibly multi-line, possibly f-prefixed)
+    # into single-line equivalents by escaping internal newlines as `\n`.
+    # Newlines that were inside the string are added back as blank lines AFTER
+    # the string so subsequent line numbers stay accurate.
+    out: List[str] = []
+    i = 0
+    in_string = False  # are we inside a regular `"..."` (not triple)
+    while i < len(src):
+        c = src[i]
+        if in_string:
+            out.append(c)
+            if c == "\\" and i + 1 < len(src):
+                out.append(src[i + 1])
+                i += 2
+                continue
+            if c == '"':
+                in_string = False
+            i += 1
+            continue
+        # Detect `"""` or `f"""` triple-quote opener.
+        is_f = src[i:i + 4] == 'f"""'
+        if is_f or src[i:i + 3] == '"""':
+            start = i + (4 if is_f else 3)
+            close = src.find('"""', start)
+            if close < 0:
+                # Unterminated — leave as-is; tokenizer will report.
+                out.append(c)
+                i += 1
+                continue
+            content = src[start:close]
+            n_nl = content.count("\n")
+            esc = (content.replace("\\", "\\\\")
+                          .replace('"', '\\"')
+                          .replace("\n", "\\n"))
+            out.append(("f" if is_f else "") + '"' + esc + '"')
+            out.append("\n" * n_nl)   # preserve line numbering downstream
+            i = close + 3
+            continue
+        if c == '"':
+            in_string = True
+        out.append(c)
+        i += 1
+    return "".join(out)
 
 
 def ast_to_dict(node: Any) -> Any:

@@ -1008,10 +1008,16 @@ def _escape_for_fstring(text: str, lang: str) -> str:
     """Escape literal-text segments of an f-string for the target's own
     string/template syntax."""
     if lang == "python":
-        # f-string: `{` and `}` must be doubled; `"` must be escaped.
-        return text.replace("\\", "\\\\").replace('"', '\\"').replace("{", "{{").replace("}", "}}")
+        # Python f-strings can't have raw newlines; convert to `\n`. Also
+        # double `{` and `}`, escape `"` and `\`.
+        return (text.replace("\\", "\\\\")
+                    .replace('"', '\\"')
+                    .replace("\n", "\\n")
+                    .replace("\t", "\\t")
+                    .replace("{", "{{")
+                    .replace("}", "}}"))
     if lang == "js":
-        # Template literal: `${` is the interpolation marker; escape `\``, `\\`, `\${`.
+        # JS template literals allow embedded newlines, but escape ` and ${.
         return text.replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${")
     return text
 
