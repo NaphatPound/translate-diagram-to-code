@@ -527,7 +527,11 @@ class _Compiler:
             seen.add(a.name)
             if a.name not in spec.args:
                 allowed = ", ".join(sorted(spec.args.keys())) or "(none)"
-                suggestion = _did_you_mean(a.name, spec.args.keys())
+                # Prefer semantic synonym over lexical fuzzy match — LLMs
+                # often write `cond=` / `key=` / `msg=` instead of the
+                # canonical names, and edit-distance can't catch those.
+                syn = _arg_synonym_for(a.name, spec.args)
+                suggestion = syn or _did_you_mean(a.name, spec.args.keys())
                 hint = f". Did you mean {suggestion!r}?" if suggestion else ""
                 raise CompileError(
                     f"verb {call.verb!r} doesn't accept arg {a.name!r}{hint}. "
@@ -1209,6 +1213,55 @@ def _escape_for_fstring(text: str, lang: str) -> str:
         # JS template literals allow embedded newlines, but escape ` and ${.
         return text.replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${")
     return text
+
+
+# Semantic synonyms LLMs reach for instead of the canonical arg names.
+# Mapping: wrong-name -> list of plausible canonical names (in priority order).
+# We only suggest a canonical when it's actually declared on the verb in
+# question — that disambiguates words like "input" or "list" that map
+# differently for from-style vs of-style verbs.
+_ARG_SYNONYMS = {
+    # filter predicate
+    "cond": ["where"], "condition": ["where"], "pred": ["where"],
+    "predicate": ["where"], "filter_by": ["where"],
+    "when": ["where"], "if": ["where"],
+    # map transform
+    "as": ["to"], "into": ["to"], "transform": ["to"], "map_to": ["to"],
+    "expr": ["to"], "fn": ["to"], "func": ["to"],
+    # sort key
+    "key": ["by"], "sort_key": ["by"], "sort_by": ["by"],
+    "order_by": ["by"], "cmp": ["by"],
+    # print / generic value
+    "msg": ["value"], "message": ["value"],
+    "item": ["value"], "val": ["value"],
+    # list source — `from` for transforms, `of` for aggregators / dict views
+    "list":   ["of", "from"], "items":  ["of", "from"],
+    "lst":    ["of", "from"], "arr":    ["of", "from"],
+    "array":  ["of", "from"],
+    "source": ["from", "of"], "input":  ["from", "of"],
+    # file
+    "path": ["file"], "filename": ["file"], "fname": ["file"],
+    # separator
+    "separator": ["sep"], "delim": ["sep"], "delimiter": ["sep"],
+    # search
+    "needle": ["find"], "search": ["find"], "pattern": ["find"],
+    "pat": ["find"], "substring": ["find"], "substr": ["find"],
+    # url
+    "link": ["url"], "addr": ["url"], "href": ["url"],
+    # count
+    "num": ["n"], "k": ["n"], "limit": ["n"],
+    # ai prompt
+    "question": ["prompt"], "query": ["prompt"],
+}
+
+
+def _arg_synonym_for(name: str, allowed) -> str:
+    """If `name` is a known semantic synonym for one of the allowed args,
+    return that canonical arg name. Otherwise empty string."""
+    for canon in _ARG_SYNONYMS.get(name.lower(), ()):
+        if canon in allowed:
+            return canon
+    return ""
 
 
 def _did_you_mean(needle: str, candidates) -> str:
