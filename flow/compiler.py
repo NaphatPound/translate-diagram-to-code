@@ -741,13 +741,21 @@ class _Compiler:
     def emit_each(self, stmt: EachStmt) -> None:
         iter_src = self._render_value(stmt.iterable)
         kv = stmt.key_var is not None
+        # `enumerate(xs)` and `zip(xs, ys)` already yield pairs — don't wrap
+        # them in `.items()` (which is dict-only).
+        pair_already = (kv and isinstance(stmt.iterable, FuncCall)
+                        and stmt.iterable.name in ("enumerate", "zip", "items"))
         if self.lang == "python":
-            if kv:
+            if kv and pair_already:
+                self._emit(f"for {stmt.key_var}, {stmt.var} in {iter_src}:")
+            elif kv:
                 self._emit(f"for {stmt.key_var}, {stmt.var} in ({iter_src}).items():")
             else:
                 self._emit(f"for {stmt.var} in {iter_src}:")
         elif self.lang == "js":
-            if kv:
+            if kv and pair_already:
+                self._emit(f"for (const [{stmt.key_var}, {stmt.var}] of {iter_src}) {{")
+            elif kv:
                 self._emit(f"for (const [{stmt.key_var}, {stmt.var}] of Object.entries({iter_src})) {{")
             else:
                 self._emit(f"for (const {stmt.var} of {iter_src}) {{")
@@ -1250,6 +1258,10 @@ class _Compiler:
             ("js",     "first"):   (1, "({0})[0]"),
             ("js",     "last"):    (1, "({0})[({0}).length - 1]"),
             ("js",     "flatten"): (1, "({0}).flat()"),
+            ("python", "enumerate"): (1, "list(enumerate({0}))"),
+            ("python", "items"):     (1, "list(({0}).items())"),
+            ("js",     "enumerate"): (1, "({0}).map((_v, _i) => [_i, _v])"),
+            ("js",     "items"):     (1, "Object.entries({0})"),
             ("js",     "upper"):   (1, "({0}).toUpperCase()"),
             ("js",     "lower"):   (1, "({0}).toLowerCase()"),
             ("js",     "trim"):    (1, "({0}).trim()"),

@@ -1175,13 +1175,49 @@ class _Parser:
         args: List[Value] = []
         if i < len(toks) and toks[i].kind == "RPAREN":
             return FuncCall(name, args), i + 1
+        first_val, i = self._parse_value_maybe_spread(toks, i, line_no)
+        # Generator expression: `f(expr for var in src (if cond))`. We lower
+        # to a ListComp argument — Python builtins like sum/max/any accept
+        # a list just as happily as a generator.
+        if (i < len(toks) and toks[i].kind == "WORD"
+                and toks[i].value == "for"):
+            i += 1
+            if i >= len(toks) or toks[i].kind != "WORD" or not _is_ident(toks[i].value):
+                raise ParseError(
+                    "generator: expected variable name after 'for'",
+                    toks[i].line if i < len(toks) else line_no,
+                    toks[i].col if i < len(toks) else 1,
+                )
+            var = toks[i].value
+            i += 1
+            if i >= len(toks) or toks[i].kind != "KW_IN":
+                raise ParseError(
+                    "generator: expected 'in' after the variable",
+                    toks[i].line if i < len(toks) else line_no,
+                    toks[i].col if i < len(toks) else 1,
+                )
+            i += 1
+            source, i = self._parse_expr(toks, i, line_no)
+            cond: Optional[Value] = None
+            if i < len(toks) and toks[i].kind == "KW_IF":
+                i += 1
+                cond, i = self._parse_expr(toks, i, line_no)
+            if i >= len(toks) or toks[i].kind != "RPAREN":
+                raise ParseError(
+                    "expected ')' to close generator expression",
+                    toks[i].line if i < len(toks) else line_no,
+                    toks[i].col if i < len(toks) else 1,
+                )
+            return FuncCall(name, [ListComp(expr=first_val, var=var,
+                                            source=source, cond=cond)]), i + 1
+        args.append(first_val)
         while True:
-            val, i = self._parse_value_maybe_spread(toks, i, line_no)
-            args.append(val)
             if i >= len(toks):
                 raise ParseError("expected ')' to close function call", line_no, 1)
             if toks[i].kind == "COMMA":
                 i += 1
+                val, i = self._parse_value_maybe_spread(toks, i, line_no)
+                args.append(val)
                 continue
             if toks[i].kind == "RPAREN":
                 return FuncCall(name, args), i + 1

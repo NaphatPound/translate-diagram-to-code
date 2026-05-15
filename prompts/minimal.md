@@ -7,7 +7,9 @@ Output Flow source only. No prose, fences, or commentary.
 - Strings: `"..."`, f-strings: `f"hi {expr}"`.
 - Lists: `[a, b, c]`. Dicts: `{k: v}`. Ranges: `1..5` (inclusive).
 - Comprehensions: `[expr for x in xs]`, `[expr for x in xs if cond]`,
-  `{k: v for x in xs}`, `{k: v for x in xs if cond}`.
+  `{k: v for x in xs}`, `{k: v for x in xs if cond}`,
+  and generator expressions inside funccalls: `sum(x for x in xs)`,
+  `any(x > 0 for x in xs)`, `max(x for x in xs)`.
 - Numbers: `3`, `3.14`, `-5`. Booleans: `true` / `false`.
 
 ## Statements
@@ -19,6 +21,7 @@ Output Flow source only. No prose, fences, or commentary.
 - Builtin funccalls (1-arg, return a value, no `-> name` needed):
   `count(xs) sum(xs) min(xs) max(xs) avg(xs) sorted(xs) reverse(xs)
    unique(xs) keys(d) values(d) first(xs) last(xs) flatten(xss)
+   enumerate(xs) items(d) any(xs) all(xs)
    len(s) abs(n) round(n) str(x) int(x) float(x)`.
 - Control: `if cond / else`, `unless`, `while`, `each x in xs`,
   `each k, v in dict`, `repeat N as i`, `break`, `continue`,
