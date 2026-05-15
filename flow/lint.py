@@ -21,7 +21,7 @@ from typing import List, Optional
 
 from . import parse, ParseError
 from .parser import (
-    Program, Call, AssignStmt, MultiAssignStmt, IfStmt, EachStmt, RepeatStmt,
+    Program, Call, AssignStmt, MultiAssignStmt, IndexAssignStmt, IfStmt, EachStmt, RepeatStmt,
     WhenStmt, DefStmt, ReturnStmt, BreakStmt, ContinueStmt, TryStmt, WhileStmt, ExprStmt,
     MatchStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, ListLit, DictLit,
@@ -194,6 +194,8 @@ def _count_all_names(body) -> dict:
                 in_value(s.value)
             elif isinstance(s, MultiAssignStmt):
                 in_value(s.value)
+            elif isinstance(s, IndexAssignStmt):
+                in_value(s.target); in_value(s.value)
             elif isinstance(s, IfStmt):
                 in_value(s.cond)
                 walk(s.then)

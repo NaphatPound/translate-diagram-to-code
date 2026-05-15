@@ -17,7 +17,7 @@ import re
 from typing import List
 
 from .parser import (
-    Program, Call, AssignStmt, MultiAssignStmt, IfStmt, EachStmt, RepeatStmt, WhileStmt, WhenStmt, TryStmt,
+    Program, Call, AssignStmt, MultiAssignStmt, IndexAssignStmt, IfStmt, EachStmt, RepeatStmt, WhileStmt, WhenStmt, TryStmt,
     BreakStmt, ContinueStmt, DefStmt, ReturnStmt, ExprStmt, MatchStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, Arg,
     ListLit, DictLit, Ternary, Range, Slice, ListComp, DictComp, FString, MethodCall, IndexAccess, Spread,
@@ -66,7 +66,19 @@ def _emit_stmt(stmt, depth: int, out: List[str], usage: dict) -> None:
             out.append(f"{_INDENT * depth}{stmt.target} = {_fmt_value(stmt.value)}")
         return
     if isinstance(stmt, MultiAssignStmt):
-        out.append(f"{_INDENT * depth}{', '.join(stmt.targets)} = {_fmt_value(stmt.value)}")
+        # Detect tuple-RHS (parsed as ListLit) — render as a comma-list, not
+        # a `[1, 2]` literal, so round-trips look natural.
+        rhs = stmt.value
+        if isinstance(rhs, ListLit) and rhs.items and len(stmt.targets) == len(rhs.items):
+            rhs_src = ", ".join(_fmt_value(x) for x in rhs.items)
+        else:
+            rhs_src = _fmt_value(rhs)
+        out.append(f"{_INDENT * depth}{', '.join(stmt.targets)} = {rhs_src}")
+        return
+    if isinstance(stmt, IndexAssignStmt):
+        rec = _fmt_value(stmt.target.receiver)
+        idx = _fmt_value(stmt.target.index)
+        out.append(f"{_INDENT * depth}{rec}[{idx}] = {_fmt_value(stmt.value)}")
         return
     if isinstance(stmt, IfStmt):
         out.append(_INDENT * depth + "if " + _fmt_value(stmt.cond))
@@ -240,6 +252,9 @@ def _count_in_block(body, counts):
         elif isinstance(stmt, AssignStmt):
             _count_in_value(stmt.value, counts)
         elif isinstance(stmt, MultiAssignStmt):
+            _count_in_value(stmt.value, counts)
+        elif isinstance(stmt, IndexAssignStmt):
+            _count_in_value(stmt.target, counts)
             _count_in_value(stmt.value, counts)
         elif isinstance(stmt, IfStmt):
             _count_in_value(stmt.cond, counts)

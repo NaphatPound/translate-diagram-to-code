@@ -215,6 +215,15 @@ class AssignStmt:
 
 
 @dataclass
+class IndexAssignStmt:
+    """`d["k"] = v` / `xs[0] = v` — assign to an indexed location."""
+    target: "IndexAccess"
+    value: Value
+    line: int
+    kind: str = "index_assign"
+
+
+@dataclass
 class MultiAssignStmt:
     """`a, b = expr` — unpacks the RHS into multiple targets in order."""
     targets: List[str]
@@ -626,6 +635,9 @@ class _Parser:
             if (len(toks) >= 3
                     and toks[1].kind == "OP" and toks[1].value == "="):
                 return self._parse_assignment(line)
+            # Index assignment: `d["k"] = v` / `xs[0] = v` — `name [ ... ] =`.
+            if _is_index_assign(toks):
+                return self._parse_index_assignment(line)
             # Compound assignment: `name += expr` → `name = name + expr`.
             if (len(toks) >= 3 and toks[1].kind == "COMPOUND"):
                 return self._parse_compound_assign(line)
@@ -675,6 +687,15 @@ class _Parser:
             )
         i += 1
         value, i = self._parse_expr(toks, i, line.line_no)
+        # Tuple RHS: `a, b = 1, 2` — collect comma-separated exprs into a list
+        # that Python (and other targets) can unpack.
+        if i < len(toks) and toks[i].kind == "COMMA":
+            items = [value]
+            while i < len(toks) and toks[i].kind == "COMMA":
+                i += 1
+                more, i = self._parse_expr(toks, i, line.line_no)
+                items.append(more)
+            value = ListLit(items)
         if i != len(toks):
             extra = toks[i]
             raise ParseError(
@@ -683,6 +704,33 @@ class _Parser:
             )
         self.idx += 1
         return MultiAssignStmt(targets=targets, value=value, line=line.line_no)
+
+    def _parse_index_assignment(self, line: _Line):
+        """`d["k"] = v` / `xs[0] = v`. Caller verified the shape."""
+        toks = line.tokens
+        # Parse the LHS as a single value — it'll be an IndexAccess after
+        # `_parse_value` finishes (member-access loop handles `[`).
+        target, i = self._parse_value(toks, 0, line.line_no)
+        if not isinstance(target, IndexAccess):
+            raise ParseError(
+                "left side of index assignment must be of the form `name[...]`",
+                toks[0].line, toks[0].col,
+            )
+        if i >= len(toks) or toks[i].kind != "OP" or toks[i].value != "=":
+            raise ParseError(
+                "expected '=' after index target",
+                toks[i].line if i < len(toks) else line.line_no,
+                toks[i].col if i < len(toks) else 1,
+            )
+        i += 1
+        value, i = self._parse_expr(toks, i, line.line_no)
+        if i != len(toks):
+            raise ParseError(
+                f"unexpected token after index-assign value: {toks[i].value!r}",
+                toks[i].line, toks[i].col,
+            )
+        self.idx += 1
+        return IndexAssignStmt(target=target, value=value, line=line.line_no)
 
     def _parse_compound_assign(self, line: _Line) -> "AssignStmt":
         """`name += expr` desugars to `name = name + expr`. Same for `-= *= /=`."""
@@ -1654,6 +1702,25 @@ def _is_expr_continuation(tok) -> bool:
     if tok.kind == "OP" and tok.value in ("+", "*", "/", "%", "<", ">"):
         return True
     return False
+
+
+def _is_index_assign(toks) -> bool:
+    """`WORD [ ... ] =` pattern, where `...` is a balanced expression.
+    The `=` must be a plain assignment, not `==`."""
+    if len(toks) < 5 or toks[0].kind != "WORD" or toks[1].kind != "LBRACK":
+        return False
+    depth = 1
+    i = 2
+    while i < len(toks) and depth > 0:
+        if toks[i].kind == "LBRACK":
+            depth += 1
+        elif toks[i].kind == "RBRACK":
+            depth -= 1
+        i += 1
+    # `i` now points just past the closing `]`. Need a bare `=` next.
+    return (i < len(toks)
+            and toks[i].kind == "OP"
+            and toks[i].value == "=")
 
 
 def _looks_like_multi_assign(toks) -> bool:

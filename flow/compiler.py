@@ -19,7 +19,7 @@ import re
 from typing import List, Set
 
 from .parser import (
-    Program, Call, AssignStmt, MultiAssignStmt, IfStmt, EachStmt, RepeatStmt, WhileStmt, WhenStmt, TryStmt,
+    Program, Call, AssignStmt, MultiAssignStmt, IndexAssignStmt, IfStmt, EachStmt, RepeatStmt, WhileStmt, WhenStmt, TryStmt,
     BreakStmt, ContinueStmt, DefStmt, ReturnStmt, ExprStmt, MatchStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, Arg,
     ListLit, DictLit, Ternary, Range, Slice, ListComp, DictComp, FString, MethodCall, IndexAccess, Spread,
@@ -202,6 +202,8 @@ class _Compiler:
             self.emit_assign(stmt)
         elif isinstance(stmt, MultiAssignStmt):
             self.emit_multi_assign(stmt)
+        elif isinstance(stmt, IndexAssignStmt):
+            self.emit_index_assign(stmt)
         elif isinstance(stmt, IfStmt):
             self.emit_if(stmt)
         elif isinstance(stmt, EachStmt):
@@ -555,6 +557,23 @@ class _Compiler:
             # Bash array indexing.
             for i, t in enumerate(stmt.targets):
                 self._emit(f"{t}=\"${{{val_src.lstrip('$')}[{i}]}}\"")
+
+    def emit_index_assign(self, stmt: IndexAssignStmt) -> None:
+        rec_src = self._render_value(stmt.target.receiver)
+        idx_src = self._render_value(stmt.target.index)
+        val_src = self._render_value(stmt.value)
+        if self.lang == "python":
+            self._emit(f"{rec_src}[{idx_src}] = {val_src}")
+        elif self.lang == "js":
+            self._emit(f"{rec_src}[{idx_src}] = {val_src};")
+        elif self.lang == "go":
+            self._emit(f"{rec_src}[{idx_src}] = {val_src}")
+        elif self.lang == "rust":
+            # Rust HashMap: use .insert; for Vec: use indexing.
+            # Best-effort generic .insert call.
+            self._emit(f"({rec_src}).insert({idx_src}, {val_src});")
+        elif self.lang == "bash":
+            self._emit(f"{rec_src.lstrip('$')}[{idx_src}]={val_src}")
 
     def emit_assign(self, stmt: AssignStmt) -> None:
         val_src = self._render_value(stmt.value)

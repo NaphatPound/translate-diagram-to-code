@@ -31,7 +31,7 @@ from typing import List, Optional
 
 from . import parse
 from .parser import (
-    Program, Call, AssignStmt, MultiAssignStmt, IfStmt, EachStmt, RepeatStmt, WhileStmt, WhenStmt, TryStmt,
+    Program, Call, AssignStmt, MultiAssignStmt, IndexAssignStmt, IfStmt, EachStmt, RepeatStmt, WhileStmt, WhenStmt, TryStmt,
     DefStmt, ReturnStmt, ExprStmt, MatchStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, ListLit, DictLit,
     Ternary, Range, Slice, ListComp, DictComp, FString, MethodCall, IndexAccess, Spread, Arg,
@@ -280,6 +280,9 @@ def _simplify_in_body(body):
         elif isinstance(s, AssignStmt):
             s.value = _simplify_value(s.value)
         elif isinstance(s, MultiAssignStmt):
+            s.value = _simplify_value(s.value)
+        elif isinstance(s, IndexAssignStmt):
+            s.target = _simplify_value(s.target)
             s.value = _simplify_value(s.value)
         elif isinstance(s, IfStmt):
             s.cond = _simplify_value(s.cond)
@@ -624,6 +627,9 @@ def _count_in_body(body, counts) -> None:
             _count_in_value(s.value, counts)
         elif isinstance(s, MultiAssignStmt):
             _count_in_value(s.value, counts)
+        elif isinstance(s, IndexAssignStmt):
+            _count_in_value(s.target, counts)
+            _count_in_value(s.value, counts)
         elif isinstance(s, IfStmt):
             _count_in_value(s.cond, counts)
             _count_in_body(s.then, counts)
@@ -724,6 +730,9 @@ def _replace_and_drop(body, inlines):
         elif isinstance(stmt, AssignStmt):
             stmt.value = _replace_value(stmt.value, inlines)
         elif isinstance(stmt, MultiAssignStmt):
+            stmt.value = _replace_value(stmt.value, inlines)
+        elif isinstance(stmt, IndexAssignStmt):
+            stmt.target = _replace_value(stmt.target, inlines)
             stmt.value = _replace_value(stmt.value, inlines)
         elif isinstance(stmt, IfStmt):
             stmt.cond = _replace_value(stmt.cond, inlines)
