@@ -12,6 +12,10 @@ Output Flow source only. No prose, fences, or commentary.
 - Verb call: `verb arg=value -> name` (first arg can be positional).
 - Assignment: `name = expr`, `a, b = expr`, `name += expr`.
 - Pipe: `a | b | c` (output flows into next call's primary arg).
+  A bare variable can start a pipe: `xs | reverse | p`.
+- Builtin funccalls (1-arg, return a value, no `-> name` needed):
+  `count(xs) sum(xs) min(xs) max(xs) avg(xs) sorted(xs) reverse(xs)
+   unique(xs) keys(d) values(d) len(s) abs(n) round(n) str(x) int(x) float(x)`.
 - Control: `if cond / else`, `unless`, `while`, `each x in xs`,
   `each k, v in dict`, `repeat N as i`, `break`, `continue`,
   `try / catch e`, `return value`.
@@ -30,8 +34,9 @@ Output Flow source only. No prose, fences, or commentary.
 
 ## Verbs by category
   io      read write print ask load save
-  data    filter map sort take skip count join split
+  data    filter map sort take skip count join split reverse unique keys values
   text    format upper lower trim replace contains
+  math    add sub mul div sum avg min max round
   time    now today wait
   net     http_get http_post download
   ai      ask_ai classify summarize translate

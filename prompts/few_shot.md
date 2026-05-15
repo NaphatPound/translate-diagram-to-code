@@ -109,6 +109,36 @@ each item in top
 
 ---
 
+USER: count the unique words in a sentence
+
+A:
+```
+split "the cat sat on the mat" sep=" " -> words
+p count(unique(words))
+```
+
+---
+
+USER: reverse a list and print
+
+A:
+```
+xs = [1, 2, 3]
+xs | reverse | p
+```
+
+---
+
+USER: print all keys of a dict
+
+A:
+```
+d = {"a": 1, "b": 2, "c": 3}
+d | keys | p
+```
+
+---
+
 USER: define double(x) and call it
 
 A:
@@ -176,3 +206,7 @@ p label("unknown_x")
 - ❌ `return x` at def end            ✅ bare `x` (implicit return)
 - ❌ `add a=1 b=2 -> s`               ✅ `s = 1 + 2` (use assignment for math)
 - ❌ `count of=items -> n`            ✅ `n = count(items)` (assignment + funccall)
+- ❌ `reverse from=xs -> ys / p ys`   ✅ `p reverse(xs)` or `xs | reverse | p`
+- ❌ `unique from=xs -> ys / p ys`    ✅ `p unique(xs)` or `xs | unique | p`
+- ❌ a zero-arg verb at start of pipe with no `()`: ambiguous; `now | f` is fine, but
+       to pipe a variable named `now` you must rename it.
