@@ -20,7 +20,8 @@ fences, no commentary. The parser is strict.
 - Assignment:          `name = expr` ; `a, b = expr` ; `name += expr`
 - Control:             `if cond / else`, `unless cond`, `while cond`,
                        `each x in xs`, `each k, v in dict`, `repeat N as i`,
-                       `break`, `continue`, `try / catch e`, `return value`
+                       `break`, `continue`, `try / catch e`, `return value`,
+                       `match value / case PAT / else` (literal patterns)
 - Postfix:             `X if cond`, `X unless cond`
 - Def + call:          `def name p1 p2=default` (body), `name(args)`
 - Implicit return:     a `def` body's last bare expression auto-returns

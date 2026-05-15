@@ -18,7 +18,7 @@ from typing import List
 
 from .parser import (
     Program, Call, AssignStmt, MultiAssignStmt, IfStmt, EachStmt, RepeatStmt, WhileStmt, WhenStmt, TryStmt,
-    BreakStmt, ContinueStmt, DefStmt, ReturnStmt, ExprStmt,
+    BreakStmt, ContinueStmt, DefStmt, ReturnStmt, ExprStmt, MatchStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, Arg,
     ListLit, DictLit, Ternary, Range, FString, MethodCall, IndexAccess, Spread,
 )
@@ -126,6 +126,15 @@ def _emit_stmt(stmt, depth: int, out: List[str], usage: dict) -> None:
         return
     if isinstance(stmt, ExprStmt):
         out.append(_INDENT * depth + _fmt_value(stmt.value))
+        return
+    if isinstance(stmt, MatchStmt):
+        out.append(f"{_INDENT * depth}match {_fmt_value(stmt.value)}")
+        for pat, body in stmt.cases:
+            out.append(f"{_INDENT * (depth + 1)}case {_fmt_value(pat)}")
+            _emit_block(body, depth + 2, out, usage)
+        if stmt.else_body:
+            out.append(f"{_INDENT * (depth + 1)}else")
+            _emit_block(stmt.else_body, depth + 2, out, usage)
         return
     raise ValueError(f"unknown statement: {type(stmt).__name__}")
 
@@ -255,6 +264,13 @@ def _count_in_block(body, counts):
             _count_in_block(stmt.catch_body, counts)
         elif isinstance(stmt, DefStmt):
             _count_in_block(stmt.body, counts)
+        elif isinstance(stmt, MatchStmt):
+            _count_in_value(stmt.value, counts)
+            for pat, body in stmt.cases:
+                _count_in_value(pat, counts)
+                _count_in_block(body, counts)
+            if stmt.else_body:
+                _count_in_block(stmt.else_body, counts)
         elif isinstance(stmt, ReturnStmt):
             if stmt.value is not None:
                 _count_in_value(stmt.value, counts)

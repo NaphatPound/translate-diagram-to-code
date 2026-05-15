@@ -28,7 +28,7 @@ from typing import List, Optional, Union, Tuple, Any
 # ============================================================
 
 Value = Union["StringLit", "NumberLit", "BoolLit", "Name", "FuncCall", "BinOp", "UnaryOp", "ListLit", "DictLit", "Ternary", "Range", "FString", "MethodCall", "IndexAccess", "Spread"]
-Stmt = Union["Call", "AssignStmt", "MultiAssignStmt", "IfStmt", "EachStmt", "RepeatStmt", "WhileStmt", "WhenStmt", "TryStmt", "BreakStmt", "ContinueStmt", "DefStmt", "ReturnStmt", "ExprStmt"]
+Stmt = Union["Call", "AssignStmt", "MultiAssignStmt", "IfStmt", "EachStmt", "RepeatStmt", "WhileStmt", "WhenStmt", "TryStmt", "BreakStmt", "ContinueStmt", "DefStmt", "ReturnStmt", "ExprStmt", "MatchStmt"]
 
 
 @dataclass
@@ -278,6 +278,18 @@ class ExprStmt:
 
 
 @dataclass
+class MatchStmt:
+    """`match value` followed by one or more `case PATTERN` arms and an
+    optional `else` arm. Patterns are literal expressions; matching is
+    equality (==)."""
+    value: Value
+    cases: List[Tuple[Value, List[Stmt]]]
+    else_body: Optional[List[Stmt]]
+    line: int
+    kind: str = "match"
+
+
+@dataclass
 class Program:
     body: List[Stmt]
     kind: str = "program"
@@ -303,6 +315,7 @@ class ParseError(Exception):
 
 KEYWORDS = {"if", "else", "unless", "each", "in", "repeat", "while", "when", "as",
             "try", "catch", "break", "continue", "def", "return",
+            "match", "case",
             "and", "or", "not", "true", "false"}
 
 # Single-letter aliases for the most common verbs. The parser substitutes
@@ -524,6 +537,8 @@ class _Parser:
             return self._parse_when(base_indent)
         if first.kind == "KW_TRY":
             return self._parse_try(base_indent)
+        if first.kind == "KW_MATCH":
+            return self._parse_match(base_indent)
         if first.kind == "KW_UNLESS":
             return self._parse_unless(base_indent)
         if first.kind == "KW_BREAK":
@@ -1195,6 +1210,57 @@ class _Parser:
         if kw == "KW_UNLESS":
             cond = UnaryOp("not", cond)
         return IfStmt(cond=cond, then=[stmt], else_=None, line=line.line_no)
+
+    def _parse_match(self, base_indent: int) -> MatchStmt:
+        line = self.lines[self.idx]
+        toks = line.tokens
+        if len(toks) < 2:
+            raise ParseError("'match' needs a value: match <expr>",
+                             line.line_no, 1)
+        value, i = self._parse_expr(toks, 1, line.line_no)
+        if i != len(toks):
+            raise ParseError(f"unexpected token after match value: {toks[i].value!r}",
+                             toks[i].line, toks[i].col)
+        self.idx += 1
+        cases: List[Tuple[Value, List["Stmt"]]] = []
+        else_body: Optional[List["Stmt"]] = None
+        # Collect `case PATTERN` and optional `else` arms at one indent deeper.
+        case_indent = base_indent + 1
+        while self.idx < len(self.lines):
+            l = self.lines[self.idx]
+            if l.indent != case_indent:
+                break
+            if l.tokens[0].kind == "KW_CASE":
+                if len(l.tokens) < 2:
+                    raise ParseError("'case' needs a pattern: case <expr>",
+                                     l.line_no, 1)
+                pat, j = self._parse_expr(l.tokens, 1, l.line_no)
+                if j != len(l.tokens):
+                    raise ParseError(
+                        f"unexpected token after case pattern: {l.tokens[j].value!r}",
+                        l.tokens[j].line, l.tokens[j].col,
+                    )
+                self.idx += 1
+                body, _ = self._parse_block(case_indent + 1)
+                cases.append((pat, body))
+            elif l.tokens[0].kind == "KW_ELSE":
+                if len(l.tokens) != 1:
+                    raise ParseError(
+                        "'else' inside match must be alone on its line",
+                        l.tokens[1].line, l.tokens[1].col,
+                    )
+                self.idx += 1
+                else_body, _ = self._parse_block(case_indent + 1)
+                break
+            else:
+                break
+        if not cases and else_body is None:
+            raise ParseError(
+                "'match' must have at least one `case` or `else` arm",
+                line.line_no, 1,
+            )
+        return MatchStmt(value=value, cases=cases, else_body=else_body,
+                         line=line.line_no)
 
     def _parse_unless(self, base_indent: int) -> IfStmt:
         """`unless cond` ≡ `if !cond`. Desugars to an IfStmt at parse time."""

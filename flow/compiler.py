@@ -20,7 +20,7 @@ from typing import List, Set
 
 from .parser import (
     Program, Call, AssignStmt, MultiAssignStmt, IfStmt, EachStmt, RepeatStmt, WhileStmt, WhenStmt, TryStmt,
-    BreakStmt, ContinueStmt, DefStmt, ReturnStmt, ExprStmt,
+    BreakStmt, ContinueStmt, DefStmt, ReturnStmt, ExprStmt, MatchStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, Arg,
     ListLit, DictLit, Ternary, Range, FString, MethodCall, IndexAccess, Spread,
 )
@@ -192,8 +192,84 @@ class _Compiler:
             self.emit_return(stmt)
         elif isinstance(stmt, ExprStmt):
             self.emit_expr_stmt(stmt)
+        elif isinstance(stmt, MatchStmt):
+            self.emit_match(stmt)
         else:
             raise CompileError(f"unknown statement type: {type(stmt).__name__}")
+
+    def emit_match(self, stmt: MatchStmt) -> None:
+        """Lower `match value` to a chained if/elif/else over `== pattern`."""
+        val_src = self._render_value(stmt.value)
+        tmp = self._fresh_temp("_m")
+        # Emit the cache assignment.
+        if self.lang == "python":
+            self._emit(f"{tmp} = {val_src}")
+        elif self.lang == "js":
+            self._emit(f"const {tmp} = {val_src};")
+        elif self.lang == "go":
+            self._emit(f"var {tmp} = {val_src}")
+        elif self.lang == "rust":
+            self._emit(f"let {tmp} = {val_src};")
+        elif self.lang == "bash":
+            self._emit(f"{tmp}={val_src}")
+        self.scope.add(tmp)
+        # Lang-specific helpers for `if cond` / `else if cond` / `else` / close.
+        is_c_like = self.lang in ("js", "go", "rust")
+        for idx, (pat, body) in enumerate(stmt.cases):
+            pat_src = self._render_value(pat)
+            if self.lang == "python":
+                kw = "if" if idx == 0 else "elif"
+                self._emit(f"{kw} {tmp} == {pat_src}:")
+                self._block_open()
+                for s in body:
+                    self.emit_stmt(s)
+                self._block_close()
+            elif self.lang == "bash":
+                kw = "if" if idx == 0 else "elif"
+                self._emit(f"{kw} [[ ${tmp.lstrip('$')} == {pat_src} ]]; then")
+                self._block_open()
+                for s in body:
+                    self.emit_stmt(s)
+                self.indent -= 1
+            elif is_c_like:
+                head = (f"if ({tmp} == {pat_src}) {{" if idx == 0
+                        else f"}} else if ({tmp} == {pat_src}) {{")
+                self._emit(head)
+                self._block_open()
+                for s in body:
+                    self.emit_stmt(s)
+                self.indent -= 1
+        # Trailing else / close.
+        if stmt.else_body:
+            if self.lang == "python":
+                self._emit("else:")
+                self._block_open()
+                for s in stmt.else_body:
+                    self.emit_stmt(s)
+                self._block_close()
+            elif self.lang == "bash":
+                self._emit("else")
+                self._block_open()
+                for s in stmt.else_body:
+                    self.emit_stmt(s)
+                self.indent -= 1
+            elif is_c_like:
+                self._emit("} else {")
+                self._block_open()
+                for s in stmt.else_body:
+                    self.emit_stmt(s)
+                self._block_close()
+        else:
+            if is_c_like:
+                self._emit("}")
+        if self.lang == "bash":
+            self._emit("fi")
+        self.scope.discard(tmp)
+
+    def _fresh_temp(self, prefix: str = "_t") -> str:
+        n = getattr(self, "_temp_counter", 0) + 1
+        self._temp_counter = n
+        return f"{prefix}{n}"
 
     def emit_def(self, stmt: DefStmt) -> None:
         # Render `name` or `name=default` per language.

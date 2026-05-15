@@ -32,7 +32,7 @@ from typing import List, Optional
 from . import parse
 from .parser import (
     Program, Call, AssignStmt, MultiAssignStmt, IfStmt, EachStmt, RepeatStmt, WhileStmt, WhenStmt, TryStmt,
-    DefStmt, ReturnStmt, ExprStmt,
+    DefStmt, ReturnStmt, ExprStmt, MatchStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, ListLit, DictLit,
     Ternary, Range, FString, MethodCall, IndexAccess, Spread, Arg,
 )
@@ -75,6 +75,13 @@ def _shrink_block(body):
             continue
         if isinstance(stmt, (EachStmt, RepeatStmt, WhileStmt, WhenStmt)):
             stmt.body = _shrink_block(stmt.body)
+            new.append(stmt)
+            i += 1
+            continue
+        if isinstance(stmt, MatchStmt):
+            stmt.cases = [(p, _shrink_block(b)) for p, b in stmt.cases]
+            if stmt.else_body is not None:
+                stmt.else_body = _shrink_block(stmt.else_body)
             new.append(stmt)
             i += 1
             continue
