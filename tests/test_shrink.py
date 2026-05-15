@@ -298,6 +298,28 @@ class TestNegationSimplify(unittest.TestCase):
         self.assertTrue(_semantically_same(before, shrink_source(before)))
 
 
+class TestDropUnusedCallOut(unittest.TestCase):
+    """`Call(..., out=name)` with name never used should drop the arrow."""
+
+    def test_unused_read_arrow_dropped(self):
+        out = shrink_source('read "a.csv" -> contents\np "done"')
+        self.assertNotIn("-> contents", out)
+        self.assertIn('read "a.csv"', out)
+
+    def test_used_arrow_kept(self):
+        out = shrink_source('read "a.csv" -> text\np text')
+        # Pipe-coalesce may rewrite this to a pipe but the call shouldn't
+        # become bare — `text` is used downstream.
+        self.assertNotIn("read \"a.csv\"\nprint", out)
+
+    def test_underscore_temps_untouched(self):
+        # `_p1` would normally be dropped by usage-count, but underscore
+        # prefix exempts it.
+        src = 'read "a.csv" -> _hidden\np "ok"'
+        out = shrink_source(src)
+        self.assertIn("-> _hidden", out)
+
+
 class TestPipeCoalesce(unittest.TestCase):
     """Single-use user-named Call.out names should rename to _pN so the
     formatter emits a pipe chain."""

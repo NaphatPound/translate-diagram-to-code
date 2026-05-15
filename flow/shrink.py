@@ -83,9 +83,46 @@ def shrink_source(src: str) -> str:
 def shrink(program: Program) -> Program:
     program.body = _simplify_in_body(program.body)
     program.body = _shrink_block(program.body)
+    _drop_unused_call_out(program)
     program = _inline_single_use(program)
     _coalesce_user_temps(program)
     return program
+
+
+def _drop_unused_call_out(program: Program) -> None:
+    """When a Call captures `-> name` but `name` is never referenced
+    anywhere, drop the capture (the side-effect of the call remains).
+
+    Skips names beginning with `_` (parser temps + user opt-out) and
+    only acts when the verb has no `returns=False` requirement — we
+    don't want to error by dropping an output the user explicitly
+    needed elsewhere.
+    """
+    counts: dict = {}
+    _count_in_body(program.body, counts)
+
+    def walk(stmts):
+        for s in stmts:
+            if isinstance(s, Call) and s.out and not s.out.startswith("_"):
+                if counts.get(s.out, 0) == 0:
+                    s.out = None
+            if isinstance(s, IfStmt):
+                walk(s.then)
+                if s.else_:
+                    walk(s.else_)
+            elif isinstance(s, (EachStmt, RepeatStmt, WhileStmt, WhenStmt)):
+                walk(s.body)
+            elif isinstance(s, TryStmt):
+                walk(s.try_body)
+                walk(s.catch_body)
+            elif isinstance(s, DefStmt):
+                walk(s.body)
+            elif isinstance(s, MatchStmt):
+                for _pat, b in s.cases:
+                    walk(b)
+                if s.else_body:
+                    walk(s.else_body)
+    walk(program.body)
 
 
 # ============================================================

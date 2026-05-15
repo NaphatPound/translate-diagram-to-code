@@ -50,9 +50,10 @@ class TestLintPositional(unittest.TestCase):
         self.assertIn('print "hi"', ws[0].suggestion)
 
     def test_upper_text_suggests_positional(self):
-        ws = lint_source('upper text="abc" -> big')
-        self.assertEqual(len(ws), 1)
-        self.assertIn('upper "abc" -> big', ws[0].suggestion)
+        # Use the output downstream so the unused-output lint doesn't fire.
+        ws = lint_source('upper text="abc" -> big\np big')
+        sugs = [w.suggestion for w in ws]
+        self.assertTrue(any('upper "abc" -> big' in s for s in sugs))
 
     def test_positional_form_emits_no_warning(self):
         ws = lint_source('print "hi"')
@@ -105,6 +106,32 @@ class TestLintMirrorReturn(unittest.TestCase):
         self.assertFalse(any("mirror" in w.message for w in ws))
 
 
+class TestLintUnusedOutput(unittest.TestCase):
+    """`-> name` on a verb call where `name` is never read should warn."""
+
+    def test_unused_read_output_warns(self):
+        ws = lint_source('read "a.csv" -> contents\np "done"')
+        msgs = [w.message for w in ws]
+        self.assertTrue(any("'contents'" in m and "never used" in m for m in msgs))
+
+    def test_underscore_prefix_silences(self):
+        ws = lint_source('read "a.csv" -> _contents\np "done"')
+        msgs = [w.message for w in ws]
+        self.assertFalse(any("never used" in m for m in msgs))
+
+    def test_used_output_no_warning(self):
+        ws = lint_source('read "a.csv" -> contents\np contents')
+        msgs = [w.message for w in ws]
+        self.assertFalse(any("never used" in m for m in msgs))
+
+    def test_math_verb_suppresses_unused_output(self):
+        # Math verb has its own stronger "could be assignment" warning,
+        # so the unused-output one should NOT fire.
+        ws = lint_source("add a=1 b=2 -> s")
+        msgs = [w.message for w in ws]
+        self.assertFalse(any("never used" in m for m in msgs))
+
+
 class TestLintNoFalsePositives(unittest.TestCase):
 
     def test_compact_code_clean(self):
@@ -118,7 +145,8 @@ class TestLintNoFalsePositives(unittest.TestCase):
 
     def test_does_not_warn_on_filter_with_where(self):
         # filter has multiple args, positional-only suggestion shouldn't fire.
-        ws = lint_source('filter from=xs where="x > 0" -> big')
+        # Use the output downstream so unused-output lint stays quiet too.
+        ws = lint_source('filter from=xs where="x > 0" -> big\np big')
         self.assertEqual(len(ws), 0)
 
 

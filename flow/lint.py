@@ -32,7 +32,8 @@ from .verbs import VERBS
 
 MATH_TO_OP = {"add": "+", "sub": "-", "mul": "*", "div": "/"}
 OF_FUNCS = {"count", "sum", "min", "max", "avg", "keys", "values"}
-FROM_FUNCS = {"reverse", "unique"}
+FROM_FUNCS = {"reverse", "unique", "first", "last", "flatten"}
+MULTI_FUNCS = {"replace", "split", "join", "contains", "zip", "format"}
 AGGS = OF_FUNCS  # back-compat alias for callers
 
 
@@ -83,6 +84,25 @@ def _check_unused_vars(body: list, out: List[LintWarning]) -> None:
                         s.line,
                         f"variable {s.target!r} is assigned but never used",
                         f"remove the assignment, or rename to `_{s.target}` to silence",
+                    ))
+            elif isinstance(s, Call) and s.out:
+                # Captured output of a verb call that's never read.
+                # Skip verbs that have a stronger "could be an assignment"
+                # warning (math/agg/transform/multi-funcs); those tell the
+                # user the same thing in a more actionable form.
+                stronger = (
+                    s.verb in MATH_TO_OP
+                    or s.verb in OF_FUNCS
+                    or s.verb in FROM_FUNCS
+                    or s.verb in MULTI_FUNCS
+                )
+                if (not stronger
+                        and not s.out.startswith("_")
+                        and usage.get(s.out, 0) == 0):
+                    out.append(LintWarning(
+                        s.line,
+                        f"output {s.out!r} of `{s.verb}` is never used",
+                        f"drop the `-> {s.out}` (the side-effect still runs)",
                     ))
             # Recurse into nested blocks where assignments can also appear.
             if isinstance(s, IfStmt):
