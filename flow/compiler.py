@@ -886,6 +886,19 @@ class _Compiler:
                 op = "and" if self.lang == "python" else "&&"
             elif op == "or":
                 op = "or"  if self.lang == "python" else "||"
+            elif op == "in":
+                # `x in xs`: works on strings, lists, dicts in Python.
+                if self.lang == "python":
+                    return f"({l} in {r})"
+                if self.lang == "js":
+                    # `.includes` covers strings + arrays. For object-key
+                    # checks, the user should write `x in keys(d)`.
+                    return f"({r}).includes({l})"
+                if self.lang == "rust":
+                    return f"({r}).contains(&{l})"
+                # Go / Bash have no clean one-liner; emit Python-style and
+                # let the target-specific user adapt.
+                return f"({l} in {r})"
             return f"({l} {op} {r})"
         if isinstance(v, UnaryOp):
             inner = self._render_value(v.value)

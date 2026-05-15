@@ -1445,7 +1445,7 @@ def _looks_like_multi_assign(toks) -> bool:
 _OP_PRECEDENCE = {
     "??": 1,  # null-coalescing — lowest, paired with or
     "or":  1, "and": 2,
-    "==": 3, "!=": 3, "<":  3, ">":  3, "<=": 3, ">=": 3,
+    "==": 3, "!=": 3, "<":  3, ">":  3, "<=": 3, ">=": 3, "in": 3,
     "+":  4, "-":  4,
     "*":  5, "/":  5, "%":  5,
 }
@@ -1463,6 +1463,8 @@ def _op_from_token(tok: "Token") -> Optional[str]:
         return "and"
     if tok.kind == "KW_OR":
         return "or"
+    if tok.kind == "KW_IN":
+        return "in"
     if tok.kind in ("CMP", "OP"):
         return tok.value
     return None
