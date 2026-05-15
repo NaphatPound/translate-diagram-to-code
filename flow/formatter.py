@@ -20,7 +20,7 @@ from .parser import (
     Program, Call, AssignStmt, MultiAssignStmt, IfStmt, EachStmt, RepeatStmt, WhileStmt, WhenStmt, TryStmt,
     BreakStmt, ContinueStmt, DefStmt, ReturnStmt, ExprStmt, MatchStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, Arg,
-    ListLit, DictLit, Ternary, Range, Slice, ListComp, FString, MethodCall, IndexAccess, Spread,
+    ListLit, DictLit, Ternary, Range, Slice, ListComp, DictComp, FString, MethodCall, IndexAccess, Spread,
 )
 
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -304,6 +304,12 @@ def _count_in_value(value, counts):
         _count_in_value(value.source, counts)
         if value.cond is not None:
             _count_in_value(value.cond, counts)
+    elif isinstance(value, DictComp):
+        _count_in_value(value.key_expr, counts)
+        _count_in_value(value.val_expr, counts)
+        _count_in_value(value.source, counts)
+        if value.cond is not None:
+            _count_in_value(value.cond, counts)
     elif isinstance(value, ListLit):
         for x in value.items:
             _count_in_value(x, counts)
@@ -432,6 +438,10 @@ def _fmt_value(v) -> str:
     if isinstance(v, ListComp):
         cond = f" if {_fmt_value(v.cond)}" if v.cond is not None else ""
         return f"[{_fmt_value(v.expr)} for {v.var} in {_fmt_value(v.source)}{cond}]"
+    if isinstance(v, DictComp):
+        cond = f" if {_fmt_value(v.cond)}" if v.cond is not None else ""
+        return (f"{{{_fmt_value(v.key_expr)}: {_fmt_value(v.val_expr)} "
+                f"for {v.var} in {_fmt_value(v.source)}{cond}}}")
     if isinstance(v, FString):
         body = ""
         for part in v.parts:

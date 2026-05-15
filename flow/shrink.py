@@ -34,7 +34,7 @@ from .parser import (
     Program, Call, AssignStmt, MultiAssignStmt, IfStmt, EachStmt, RepeatStmt, WhileStmt, WhenStmt, TryStmt,
     DefStmt, ReturnStmt, ExprStmt, MatchStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, ListLit, DictLit,
-    Ternary, Range, Slice, ListComp, FString, MethodCall, IndexAccess, Spread, Arg,
+    Ternary, Range, Slice, ListComp, DictComp, FString, MethodCall, IndexAccess, Spread, Arg,
 )
 from .formatter import format_source
 
@@ -248,6 +248,14 @@ def _simplify_value(v):
     if isinstance(v, ListComp):
         return ListComp(
             expr=_simplify_value(v.expr),
+            var=v.var,
+            source=_simplify_value(v.source),
+            cond=None if v.cond is None else _simplify_value(v.cond),
+        )
+    if isinstance(v, DictComp):
+        return DictComp(
+            key_expr=_simplify_value(v.key_expr),
+            val_expr=_simplify_value(v.val_expr),
             var=v.var,
             source=_simplify_value(v.source),
             cond=None if v.cond is None else _simplify_value(v.cond),
@@ -673,6 +681,12 @@ def _count_in_value(value, counts) -> None:
         _count_in_value(value.source, counts)
         if value.cond is not None:
             _count_in_value(value.cond, counts)
+    elif isinstance(value, DictComp):
+        _count_in_value(value.key_expr, counts)
+        _count_in_value(value.val_expr, counts)
+        _count_in_value(value.source, counts)
+        if value.cond is not None:
+            _count_in_value(value.cond, counts)
     elif isinstance(value, ListLit):
         for x in value.items:
             _count_in_value(x, counts)
@@ -775,6 +789,16 @@ def _replace_value(value, inlines, _expanding=None):
         inner = {k: v for k, v in inlines.items() if k != value.var}
         return ListComp(
             expr=_replace_value(value.expr, inner, _expanding),
+            var=value.var,
+            source=_replace_value(value.source, inlines, _expanding),
+            cond=(None if value.cond is None
+                  else _replace_value(value.cond, inner, _expanding)),
+        )
+    if isinstance(value, DictComp):
+        inner = {k: v for k, v in inlines.items() if k != value.var}
+        return DictComp(
+            key_expr=_replace_value(value.key_expr, inner, _expanding),
+            val_expr=_replace_value(value.val_expr, inner, _expanding),
             var=value.var,
             source=_replace_value(value.source, inlines, _expanding),
             cond=(None if value.cond is None

@@ -129,6 +129,20 @@ class ListComp:
 
 
 @dataclass
+class DictComp:
+    """Python-style dict comprehension: `{k_expr: v_expr for var in source (if cond)}`.
+
+    Lowered to a native dict comprehension in Python; `Object.fromEntries`
+    + filter/map in JS; HashMap collect chains in Rust.
+    """
+    key_expr: Value
+    val_expr: Value
+    var: str
+    source: Value
+    cond: Optional[Value] = None
+
+
+@dataclass
 class Slice:
     """Python-style exclusive slice inside `[]`. Either bound may be None.
 
@@ -1065,8 +1079,11 @@ class _Parser:
             return Spread(value=inner), i
         return self._parse_expr(toks, i, line_no)
 
-    def _parse_dict(self, toks: List[Token], i: int, line_no: int) -> Tuple[DictLit, int]:
+    def _parse_dict(self, toks: List[Token], i: int, line_no: int):
         i += 1  # consume '{'
+        # Lookahead for `for` at depth 0 → dict comprehension.
+        if _has_for_in_braces(toks, i):
+            return self._parse_dict_comp(toks, i, line_no)
         entries: List[Tuple[str, Value]] = []
         if i < len(toks) and toks[i].kind == "RBRACE":
             return DictLit(entries), i + 1
@@ -1100,6 +1117,54 @@ class _Parser:
                 return DictLit(entries), i + 1
             raise ParseError(f"expected ',' or '}}' in dict, got {toks[i].value!r}",
                              toks[i].line, toks[i].col)
+
+    def _parse_dict_comp(self, toks: List[Token], i: int, line_no: int):
+        """Parse `key_expr : val_expr for var in source (if cond) }`.
+        Caller has already consumed `{`."""
+        key_expr, i = self._parse_expr(toks, i, line_no)
+        if i >= len(toks) or toks[i].kind != "COLON":
+            raise ParseError(
+                "dict comprehension: expected ':' between key and value",
+                toks[i].line if i < len(toks) else line_no,
+                toks[i].col if i < len(toks) else 1,
+            )
+        i += 1
+        val_expr, i = self._parse_expr(toks, i, line_no)
+        if i >= len(toks) or toks[i].kind != "WORD" or toks[i].value != "for":
+            raise ParseError(
+                "dict comprehension: expected 'for' after the value expression",
+                toks[i].line if i < len(toks) else line_no,
+                toks[i].col if i < len(toks) else 1,
+            )
+        i += 1
+        if i >= len(toks) or toks[i].kind != "WORD" or not _is_ident(toks[i].value):
+            raise ParseError(
+                "dict comprehension: expected variable name after 'for'",
+                toks[i].line if i < len(toks) else line_no,
+                toks[i].col if i < len(toks) else 1,
+            )
+        var = toks[i].value
+        i += 1
+        if i >= len(toks) or toks[i].kind != "KW_IN":
+            raise ParseError(
+                "dict comprehension: expected 'in' after the variable",
+                toks[i].line if i < len(toks) else line_no,
+                toks[i].col if i < len(toks) else 1,
+            )
+        i += 1
+        source, i = self._parse_expr(toks, i, line_no)
+        cond: Optional[Value] = None
+        if i < len(toks) and toks[i].kind == "KW_IF":
+            i += 1
+            cond, i = self._parse_expr(toks, i, line_no)
+        if i >= len(toks) or toks[i].kind != "RBRACE":
+            raise ParseError(
+                "expected '}' to close dict comprehension",
+                toks[i].line if i < len(toks) else line_no,
+                toks[i].col if i < len(toks) else 1,
+            )
+        return DictComp(key_expr=key_expr, val_expr=val_expr,
+                        var=var, source=source, cond=cond), i + 1
 
     def _parse_funccall(self, toks: List[Token], i: int, line_no: int) -> Tuple[FuncCall, int]:
         name = toks[i].value
@@ -1600,6 +1665,28 @@ def _op_from_token(tok: "Token") -> Optional[str]:
     if tok.kind in ("CMP", "OP"):
         return tok.value
     return None
+
+
+def _has_for_in_braces(toks: List["Token"], i: int) -> bool:
+    """Scan from `i` (just past `{`) until the matching `}` at depth 0.
+    Return True if a soft-keyword `for` appears at that depth — i.e. the
+    braces enclose a comprehension, not a dict literal."""
+    depth = 0
+    while i < len(toks):
+        t = toks[i]
+        if t.kind == "RBRACE":
+            if depth == 0:
+                return False
+            depth -= 1
+        elif t.kind in ("LBRACE", "LBRACK", "LPAREN"):
+            depth += 1
+        elif t.kind in ("RBRACK", "RPAREN"):
+            if depth > 0:
+                depth -= 1
+        elif t.kind == "WORD" and t.value == "for" and depth == 0:
+            return True
+        i += 1
+    return False
 
 
 def _is_ident(s: str) -> bool:

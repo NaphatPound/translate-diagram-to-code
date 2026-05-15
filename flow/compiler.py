@@ -22,7 +22,7 @@ from .parser import (
     Program, Call, AssignStmt, MultiAssignStmt, IfStmt, EachStmt, RepeatStmt, WhileStmt, WhenStmt, TryStmt,
     BreakStmt, ContinueStmt, DefStmt, ReturnStmt, ExprStmt, MatchStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, Arg,
-    ListLit, DictLit, Ternary, Range, Slice, ListComp, FString, MethodCall, IndexAccess, Spread,
+    ListLit, DictLit, Ternary, Range, Slice, ListComp, DictComp, FString, MethodCall, IndexAccess, Spread,
 )
 
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -1144,6 +1144,30 @@ class _Compiler:
                         f"return _r }}()")
             if self.lang == "bash":
                 raise CompileError("list comprehensions not supported in bash target")
+        if isinstance(v, DictComp):
+            self.scope.add(v.var)
+            try:
+                k_src = self._render_value(v.key_expr)
+                vl_src = self._render_value(v.val_expr)
+                src_src = self._render_value(v.source)
+                cond_src = (None if v.cond is None
+                            else self._render_value(v.cond))
+            finally:
+                self.scope.discard(v.var)
+            if self.lang == "python":
+                tail = f" if {cond_src}" if cond_src else ""
+                return f"{{{k_src}: {vl_src} for {v.var} in {src_src}{tail}}}"
+            if self.lang == "js":
+                src_chain = f"({src_src})"
+                if cond_src:
+                    src_chain += f".filter({v.var} => {cond_src})"
+                return (f"Object.fromEntries({src_chain}.map({v.var} => "
+                        f"[{k_src}, {vl_src}]))")
+            if self.lang == "rust":
+                tail = f".filter(|{v.var}| {cond_src})" if cond_src else ""
+                return (f"({src_src}).iter(){tail}.map(|{v.var}| "
+                        f"({k_src}, {vl_src})).collect::<std::collections::HashMap<_, _>>()")
+            raise CompileError(f"dict comprehensions not supported for lang {self.lang!r}")
         raise CompileError(f"cannot render value of type {type(v).__name__}")
 
     def _render_name(self, n: Name) -> str:

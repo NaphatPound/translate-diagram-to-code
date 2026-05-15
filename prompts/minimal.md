@@ -6,7 +6,8 @@ Output Flow source only. No prose, fences, or commentary.
 - Indent 2 spaces (never tabs).
 - Strings: `"..."`, f-strings: `f"hi {expr}"`.
 - Lists: `[a, b, c]`. Dicts: `{k: v}`. Ranges: `1..5` (inclusive).
-- Comprehensions: `[expr for x in xs]` or `[expr for x in xs if cond]`.
+- Comprehensions: `[expr for x in xs]`, `[expr for x in xs if cond]`,
+  `{k: v for x in xs}`, `{k: v for x in xs if cond}`.
 - Numbers: `3`, `3.14`, `-5`. Booleans: `true` / `false`.
 
 ## Statements
