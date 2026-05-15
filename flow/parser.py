@@ -1093,6 +1093,23 @@ class _Parser:
             i += 1
             else_val, i = self._parse_expr(toks, i, line_no)
             left = Ternary(cond=left, then=then_val, else_=else_val)
+        # Python-style ternary `X if COND else Y` at expression level.
+        # Disambiguated from postfix-if (statement modifier) by looking ahead
+        # for KW_ELSE on the same line — present means it's the expr ternary;
+        # absent means postfix-if and we don't consume.
+        elif (min_prec <= 0 and i < len(toks) and toks[i].kind == "KW_IF"
+                and any(t.kind == "KW_ELSE" for t in toks[i + 1:])):
+            i += 1  # consume `if`
+            cond, i = self._parse_expr(toks, i, line_no, min_prec=1)
+            if i >= len(toks) or toks[i].kind != "KW_ELSE":
+                raise ParseError(
+                    "expected 'else' after `X if COND` ternary condition",
+                    toks[i].line if i < len(toks) else line_no,
+                    toks[i].col if i < len(toks) else 1,
+                )
+            i += 1  # consume `else`
+            else_val, i = self._parse_expr(toks, i, line_no)
+            left = Ternary(cond=cond, then=left, else_=else_val)
         return left, i
 
     # ---------- control blocks ----------
