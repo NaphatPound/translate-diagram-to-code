@@ -129,6 +129,45 @@ def cmd_shrink(args):
         sys.stdout.write(out)
 
 
+def cmd_watch(args):
+    """Live-re-check a file: poll mtime, rerun `flow check` on each save.
+
+    Stdlib-only (no fsevent / inotify dep). Polls every 0.4s. Clears
+    screen between runs unless --no-clear is set. Ctrl+C to stop.
+    """
+    import time
+    path = Path(args.file)
+    last_mtime = None
+    last_size = None
+    print(f"watching {path} — Ctrl+C to stop", file=sys.stderr)
+    try:
+        while True:
+            try:
+                st = path.stat()
+                key = (st.st_mtime, st.st_size)
+            except FileNotFoundError:
+                key = None
+            if key != (last_mtime, last_size):
+                last_mtime, last_size = (key or (None, None))
+                if not args.no_clear:
+                    sys.stdout.write("\033[2J\033[H")
+                    sys.stdout.flush()
+                # Build a fake-args shim for cmd_check.
+                class _A: pass
+                a = _A(); a.file = args.file; a.verbose = args.verbose
+                try:
+                    cmd_check(a)
+                except SystemExit:
+                    pass
+                sys.stdout.flush()
+                print(file=sys.stderr)
+                print(f"-- watching {path} for changes --", file=sys.stderr)
+                sys.stderr.flush()
+            time.sleep(0.4)
+    except KeyboardInterrupt:
+        print("\nstopped", file=sys.stderr)
+
+
 def cmd_run(args):
     """Compile and execute the Flow program in one step.
 
@@ -368,6 +407,14 @@ def main():
     pr.add_argument("--to", choices=["python", "js", "bash"], default="python",
                     help="target runtime (default: python)")
     pr.set_defaults(func=cmd_run)
+
+    pw = sub.add_parser("watch", help="live-rerun `flow check` whenever the file changes")
+    pw.add_argument("file")
+    pw.add_argument("-v", "--verbose", action="store_true",
+                    help="show each lint suggestion on every run")
+    pw.add_argument("--no-clear", action="store_true",
+                    help="don't clear the screen between runs")
+    pw.set_defaults(func=cmd_watch)
 
     args = p.parse_args()
     args.func(args)
