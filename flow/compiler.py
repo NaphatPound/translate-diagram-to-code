@@ -549,10 +549,26 @@ class _Compiler:
             )
 
         # Render args to target-language expressions.
-        # If an arg is listed in raw_args and its value is a StringLit, embed raw.
+        # raw_args (predicates like where=/to=/by=) MUST be string literals —
+        # they get embedded raw into a comprehension so the loop var (e.g. `x`)
+        # binds inside. Without quotes, the predicate is parsed in the outer
+        # scope where `x` is undefined and silently compiles to wrong code.
+        _RAW_HINTS = {
+            "where": '"x > 0"',
+            "to":    '"x * 2"',
+            "by":    '"-x"',
+        }
         ctx: dict = {}
         for name, arg in _pairs_by_name(call.args):
-            if name in spec.raw_args and isinstance(arg.value, StringLit):
+            if name in spec.raw_args:
+                if not isinstance(arg.value, StringLit):
+                    sample = _RAW_HINTS.get(name, '"...x..."')
+                    raise CompileError(
+                        f"arg {name!r} of verb {call.verb!r} must be a quoted "
+                        f"string (e.g. {name}={sample}); the loop item is "
+                        f"bound to `x` inside the quotes",
+                        call.line,
+                    )
                 ctx[name] = arg.value.value
             else:
                 ctx[name] = self._render_value(arg.value)
