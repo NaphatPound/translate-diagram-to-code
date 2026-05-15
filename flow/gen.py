@@ -54,13 +54,20 @@ def _load_text(name: str) -> str:
     return p.read_text(encoding="utf-8")
 
 
-def _build_messages(user_request: str) -> List[dict]:
-    """Build the chat-completions message list."""
-    system = _load_text("system.md") or _DEFAULT_SYSTEM
-    few_shot = _load_text("few_shot.md")
-    if few_shot:
-        # Append few-shot as additional system context.
-        system = system + "\n\n" + few_shot
+def _build_messages(user_request: str, prompt: str = "full") -> List[dict]:
+    """Build the chat-completions message list.
+
+    `prompt`:
+      "full"    — system.md + few_shot.md  (default, ~5K chars)
+      "minimal" — minimal.md only          (~1.7K chars, for tiny LLMs)
+    """
+    if prompt == "minimal":
+        system = _load_text("minimal.md") or _DEFAULT_SYSTEM
+    else:
+        system = _load_text("system.md") or _DEFAULT_SYSTEM
+        few_shot = _load_text("few_shot.md")
+        if few_shot:
+            system = system + "\n\n" + few_shot
     return [
         {"role": "system", "content": system},
         {"role": "user", "content": user_request},
@@ -132,15 +139,19 @@ def generate(
     retries: int = 3,
     verbose: bool = False,
     polish: bool = True,
+    prompt: str = "full",
 ) -> str:
     """Generate Flow code from a natural-language request, with self-correction.
 
+    `prompt` = "full" (default) sends system.md + few_shot.md (~5K chars).
+    `prompt` = "minimal" sends only minimal.md (~1.7K chars), useful for
+    tiny LLMs whose context window can't hold the long version.
+
     When `polish` is True (default), after the LLM produces valid code we run
-    `flow lint` and, if there are suggestions, ask the LLM once to rewrite in
-    the shorter form. We keep the polished version only if it ALSO validates.
+    `flow.shrink` (deterministic) to compact the output.
     """
     cfg = cfg or LLMConfig()
-    messages = _build_messages(request)
+    messages = _build_messages(request, prompt=prompt)
 
     last_error = None
     last_code = ""
@@ -219,6 +230,7 @@ def cli_main(args) -> None:
             retries=args.retries,
             verbose=args.verbose,
             polish=not getattr(args, "no_lint", False),
+            prompt=getattr(args, "prompt", "full"),
         )
     except LLMError as e:
         print(f"ERROR: {e}", file=sys.stderr)

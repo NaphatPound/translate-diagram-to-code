@@ -285,6 +285,8 @@ def main():
     pg.add_argument("--verbose", action="store_true", help="show each attempt to stderr")
     pg.add_argument("--no-lint", action="store_true",
                     help="skip the lint-driven polish pass after success")
+    pg.add_argument("--prompt", choices=["full", "minimal"], default="full",
+                    help="prompt mode: full (~5K chars) or minimal (~1.7K) for tiny LLMs")
     pg.set_defaults(func=cmd_gen)
 
     pv = sub.add_parser("review", help="compile + run + ask a big LLM to judge correctness")
