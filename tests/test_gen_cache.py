@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from flow.gen import generate, _cache_path, _cache_key
+from flow.gen import generate, _cache_path, _cache_key, cache_clear, cache_show
 
 
 class TestCache(unittest.TestCase):
@@ -72,6 +72,39 @@ class TestCache(unittest.TestCase):
         self.assertEqual(k1, k2)
         k3 = _cache_key("hi", "minimal", 3, True, 1)
         self.assertNotEqual(k1, k3)
+
+    @patch("flow.gen._chat")
+    def test_cache_clear_removes_file(self, mock_chat):
+        mock_chat.return_value = 'p "x"'
+        generate("foo", retries=0, polish=False, cache=True)
+        self.assertTrue(_cache_path().exists())
+        n = cache_clear()
+        self.assertEqual(n, 1)
+        self.assertFalse(_cache_path().exists())
+
+    def test_cache_clear_on_empty(self):
+        # No file → returns 0, no error.
+        self.assertEqual(cache_clear(), 0)
+
+    @patch("flow.gen._chat")
+    def test_cache_show_lists_entries(self, mock_chat):
+        import io
+        mock_chat.side_effect = ['p "one"', 'p "two"']
+        generate("first", retries=0, polish=False, cache=True)
+        generate("second", retries=0, polish=False, cache=True)
+        buf = io.StringIO()
+        n = cache_show(stream=buf)
+        self.assertEqual(n, 2)
+        out = buf.getvalue()
+        self.assertIn("2 entries", out)
+        self.assertIn("one", out)
+        self.assertIn("two", out)
+
+    def test_cache_show_on_empty(self):
+        import io
+        buf = io.StringIO()
+        cache_show(stream=buf)
+        self.assertIn("empty", buf.getvalue())
 
 
 if __name__ == "__main__":

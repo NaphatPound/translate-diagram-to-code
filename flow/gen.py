@@ -72,6 +72,35 @@ def _cache_save(data: dict) -> None:
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.replace(p)
 
+
+def cache_clear() -> int:
+    """Delete the disk cache. Returns the number of entries removed."""
+    p = _cache_path()
+    if not p.exists():
+        return 0
+    n = len(_cache_load())
+    p.unlink()
+    return n
+
+
+def cache_show(stream=None) -> int:
+    """Pretty-print cache entries (key + first line of output). Returns the count."""
+    import sys as _sys
+    stream = stream or _sys.stdout
+    data = _cache_load()
+    if not data:
+        stream.write("(cache empty)\n")
+        return 0
+    p = _cache_path()
+    size = p.stat().st_size if p.exists() else 0
+    stream.write(f"{len(data)} entr{'y' if len(data) == 1 else 'ies'} at {p} ({size} bytes)\n\n")
+    for key, out in data.items():
+        first = out.splitlines()[0] if out else "(empty)"
+        if len(first) > 60:
+            first = first[:57] + "..."
+        stream.write(f"  {key}  {first}\n")
+    return len(data)
+
 _HERE = Path(__file__).resolve().parent.parent
 _PROMPTS = _HERE / "prompts"
 
@@ -316,6 +345,15 @@ def _generate_best_of_n(
 
 
 def cli_main(args) -> None:
+    # Cache management short-circuits — no LLM call needed.
+    if getattr(args, "cache_show", False):
+        cache_show()
+        return
+    if getattr(args, "cache_clear", False):
+        n = cache_clear()
+        print(f"cleared {n} cache entr{'y' if n == 1 else 'ies'}", file=sys.stderr)
+        return
+
     request = args.request
     if args.f:
         request = Path(args.f).read_text(encoding="utf-8")

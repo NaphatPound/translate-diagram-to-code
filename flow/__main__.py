@@ -374,6 +374,10 @@ def main():
                     help="best-of-N sampling: generate N candidates, return the shortest valid one")
     pg.add_argument("--cache", action="store_true",
                     help="reuse identical request results from ~/.flow/gen_cache.json")
+    pg.add_argument("--cache-show", action="store_true",
+                    help="list cached entries and exit (no LLM call)")
+    pg.add_argument("--cache-clear", action="store_true",
+                    help="wipe the disk cache and exit")
     pg.set_defaults(func=cmd_gen)
 
     pv = sub.add_parser("review", help="compile + run + ask a big LLM to judge correctness")
