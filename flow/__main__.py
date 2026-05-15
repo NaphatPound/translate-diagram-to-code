@@ -159,6 +159,16 @@ def cmd_watch(args):
                     cmd_check(a)
                 except SystemExit:
                     pass
+                if args.run:
+                    print(file=sys.stderr)
+                    print("--- run ---", file=sys.stderr)
+                    sys.stderr.flush()
+                    # Build run-args shim.
+                    ra = _A(); ra.file = args.file; ra.to = args.run_target
+                    try:
+                        cmd_run(ra)
+                    except SystemExit:
+                        pass
                 sys.stdout.flush()
                 print(file=sys.stderr)
                 print(f"-- watching {path} for changes --", file=sys.stderr)
@@ -414,6 +424,10 @@ def main():
                     help="show each lint suggestion on every run")
     pw.add_argument("--no-clear", action="store_true",
                     help="don't clear the screen between runs")
+    pw.add_argument("--run", action="store_true",
+                    help="also compile + execute on each save")
+    pw.add_argument("--run-target", choices=["python", "js", "bash"], default="python",
+                    help="target runtime for --run (default: python)")
     pw.set_defaults(func=cmd_watch)
 
     args = p.parse_args()
