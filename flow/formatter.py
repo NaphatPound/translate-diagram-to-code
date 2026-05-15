@@ -314,6 +314,8 @@ def _count_in_value(value, counts):
             _count_in_value(value.start, counts)
         if value.end is not None:
             _count_in_value(value.end, counts)
+        if value.step is not None:
+            _count_in_value(value.step, counts)
     elif isinstance(value, ListComp):
         _count_in_value(value.expr, counts)
         _count_in_value(value.source, counts)
@@ -449,6 +451,8 @@ def _fmt_value(v) -> str:
     if isinstance(v, Slice):
         s = "" if v.start is None else _fmt_value(v.start)
         e = "" if v.end is None else _fmt_value(v.end)
+        if v.step is not None:
+            return f"{s}:{e}:{_fmt_value(v.step)}"
         return f"{s}:{e}"
     if isinstance(v, ListComp):
         cond = f" if {_fmt_value(v.cond)}" if v.cond is not None else ""

@@ -244,6 +244,7 @@ def _simplify_value(v):
         return Slice(
             start=None if v.start is None else _simplify_value(v.start),
             end=None if v.end is None else _simplify_value(v.end),
+            step=None if v.step is None else _simplify_value(v.step),
         )
     if isinstance(v, ListComp):
         return ListComp(
@@ -606,7 +607,8 @@ def _is_safe_to_inline(value) -> bool:
         return _is_safe_to_inline(value.start) and _is_safe_to_inline(value.end)
     if isinstance(value, Slice):
         return ((value.start is None or _is_safe_to_inline(value.start))
-                and (value.end is None or _is_safe_to_inline(value.end)))
+                and (value.end is None or _is_safe_to_inline(value.end))
+                and (value.step is None or _is_safe_to_inline(value.step)))
     if isinstance(value, ListLit):
         return all(_is_safe_to_inline(x) for x in value.items)
     if isinstance(value, DictLit):
@@ -682,6 +684,8 @@ def _count_in_value(value, counts) -> None:
             _count_in_value(value.start, counts)
         if value.end is not None:
             _count_in_value(value.end, counts)
+        if value.step is not None:
+            _count_in_value(value.step, counts)
     elif isinstance(value, ListComp):
         _count_in_value(value.expr, counts)
         _count_in_value(value.source, counts)
@@ -792,6 +796,8 @@ def _replace_value(value, inlines, _expanding=None):
                    else _replace_value(value.start, inlines, _expanding)),
             end=(None if value.end is None
                  else _replace_value(value.end, inlines, _expanding)),
+            step=(None if value.step is None
+                  else _replace_value(value.step, inlines, _expanding)),
         )
     if isinstance(value, ListComp):
         # The bound var shadows any outer inline of the same name.

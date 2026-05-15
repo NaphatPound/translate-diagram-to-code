@@ -104,6 +104,28 @@ class TestCrossTarget(unittest.TestCase):
         self.assertIn("1..3", rs)
 
 
+class TestSliceStep(unittest.TestCase):
+    """`xs[::2]` (every other) and `xs[::-1]` (reverse) are universal idioms."""
+
+    def test_every_other(self):
+        self.assertEqual(_run("xs = [1, 2, 3, 4, 5]\np xs[::2]"),
+                         "[1, 3, 5]")
+
+    def test_reverse(self):
+        self.assertEqual(_run("xs = [1, 2, 3]\np xs[::-1]"), "[3, 2, 1]")
+
+    def test_string_reverse(self):
+        self.assertEqual(_run('p "hello"[::-1]'), "olleh")
+
+    def test_start_with_step(self):
+        self.assertEqual(_run("xs = [1, 2, 3, 4, 5]\np xs[1::2]"),
+                         "[2, 4]")
+
+    def test_full_three_part(self):
+        self.assertEqual(_run("xs = [1, 2, 3, 4, 5]\np xs[1:4:2]"),
+                         "[2, 4]")
+
+
 class TestFormatterRoundTrip(unittest.TestCase):
 
     def test_slice_formats_back(self):

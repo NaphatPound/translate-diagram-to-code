@@ -144,18 +144,22 @@ class DictComp:
 
 @dataclass
 class Slice:
-    """Python-style exclusive slice inside `[]`. Either bound may be None.
+    """Python-style exclusive slice inside `[]`. Any bound may be None.
 
-    `xs[a:b]`  → Slice(a, b)
-    `xs[a:]`   → Slice(a, None)
-    `xs[:b]`   → Slice(None, b)
-    `xs[:]`    → Slice(None, None)
+    `xs[a:b]`     → Slice(a, b)
+    `xs[a:]`      → Slice(a, None)
+    `xs[:b]`      → Slice(None, b)
+    `xs[:]`       → Slice(None, None)
+    `xs[::2]`     → Slice(None, None, 2)        every other
+    `xs[::-1]`    → Slice(None, None, -1)        reverse
+    `xs[1:5:2]`   → Slice(1, 5, 2)
 
     Distinct from Range so the compiler can emit the natural `xs[a:b]`
     in Python (no +1) and not confuse this with the inclusive `..` form.
     """
     start: Optional[Value]
     end: Optional[Value]
+    step: Optional[Value] = None
 
 
 @dataclass
@@ -977,17 +981,24 @@ class _Parser:
         while i < len(toks) and toks[i].kind in ("DOT", "OPTDOT", "LBRACK"):
             if toks[i].kind == "LBRACK":
                 i += 1
-                # Python-style slice: optional start, `:`, optional end.
-                # `xs[:]`, `xs[a:]`, `xs[:b]`, `xs[a:b]`
+                # Python-style slice: optional start, `:`, optional end,
+                # optional `:`, optional step.
+                #   xs[a:b], xs[a:], xs[:b], xs[:], xs[a:b:c], xs[::-1]
                 start_expr = None
-                if i < len(toks) and toks[i].kind != "COLON":
+                if i < len(toks) and toks[i].kind not in ("COLON", "RBRACK"):
                     start_expr, i = self._parse_expr(toks, i, line_no)
                 if i < len(toks) and toks[i].kind == "COLON":
                     i += 1
                     end_expr = None
-                    if i < len(toks) and toks[i].kind != "RBRACK":
+                    if i < len(toks) and toks[i].kind not in ("COLON", "RBRACK"):
                         end_expr, i = self._parse_expr(toks, i, line_no)
-                    idx_expr: Value = Slice(start=start_expr, end=end_expr)
+                    step_expr = None
+                    if i < len(toks) and toks[i].kind == "COLON":
+                        i += 1
+                        if i < len(toks) and toks[i].kind != "RBRACK":
+                            step_expr, i = self._parse_expr(toks, i, line_no)
+                    idx_expr: Value = Slice(start=start_expr, end=end_expr,
+                                            step=step_expr)
                 else:
                     if start_expr is None:
                         raise ParseError(

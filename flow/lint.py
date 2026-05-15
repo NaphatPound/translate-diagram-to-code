@@ -166,6 +166,7 @@ def _count_all_names(body) -> dict:
         elif isinstance(v, Slice):
             if v.start is not None: in_value(v.start)
             if v.end is not None: in_value(v.end)
+            if v.step is not None: in_value(v.step)
         elif isinstance(v, ListComp):
             in_value(v.expr); in_value(v.source)
             if v.cond is not None: in_value(v.cond)

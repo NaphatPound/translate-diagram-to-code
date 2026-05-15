@@ -1103,26 +1103,42 @@ class _Compiler:
                     return f"&{rec}[{s_src}..=({e_src})]"
                 if self.lang == "bash":
                     return f"${{{rec.lstrip('$')}:{s_src}:(({e_src}) - {s_src} + 1)}}"
-            # Python-style exclusive slice: `s[a:b]` with optional ends.
+            # Python-style exclusive slice: `s[a:b(:c)]` with optional ends/step.
             if isinstance(v.index, Slice):
                 s = "" if v.index.start is None else self._render_value(v.index.start)
                 e = "" if v.index.end is None else self._render_value(v.index.end)
-                if self.lang in ("python", "go"):
+                st = (None if v.index.step is None
+                      else self._render_value(v.index.step))
+                if self.lang == "python":
+                    if st is not None:
+                        return f"{rec}[{s}:{e}:{st}]"
+                    return f"{rec}[{s}:{e}]"
+                if self.lang == "go":
+                    # Go slices have no step; fall back ignoring it.
                     return f"{rec}[{s}:{e}]"
                 if self.lang == "js":
-                    # Slice signature: (begin, end?) — undefined means "to end".
+                    # JS .slice has no step; emit a helper for the step case.
+                    if st is not None:
+                        # `.slice(a, b)` then take every step. For `-1` step → reverse.
+                        if st == "-1":
+                            inner = f"({rec}).slice({s or '0'}, {e or '(' + rec + ').length'})"
+                            return f"[...{inner}].reverse()"
+                        inner = f"({rec}).slice({s or '0'}, {e or '(' + rec + ').length'})"
+                        return f"{inner}.filter((_, _i) => _i % ({st}) === 0)"
                     if v.index.end is None:
                         return f"({rec}).slice({s or '0'})"
                     return f"({rec}).slice({s or '0'}, {e})"
                 if self.lang == "rust":
                     s_part = s if v.index.start is not None else ""
                     e_part = e if v.index.end is not None else ""
-                    return f"&{rec}[{s_part}..{e_part}]"
+                    base = f"&{rec}[{s_part}..{e_part}]"
+                    if st is not None and st == "-1":
+                        return f"{base}.iter().rev().collect::<Vec<_>>()"
+                    return base
                 if self.lang == "bash":
-                    # Best-effort: ${var:start:length} — needs end-start.
                     if v.index.start is not None and v.index.end is not None:
                         return f"${{{rec.lstrip('$')}:{s}:(({e}) - {s})}}"
-                    return f"${{{rec.lstrip('$')}}}"  # giving up — full var
+                    return f"${{{rec.lstrip('$')}}}"
             idx = self._render_value(v.index)
             if self.lang == "bash":
                 return f"${{{rec.lstrip('$')}[{idx}]}}"

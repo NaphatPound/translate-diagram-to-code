@@ -39,6 +39,7 @@ Output Flow source only. No prose, fences, or commentary.
   `a ?? b`, `a?.b`.
 - Member: `obj.attr`, `obj["k"]`, `arr[i]`, `arr[a..b]` (inclusive),
   `arr[a:b]` / `arr[:b]` / `arr[a:]` / `arr[:]` (Python-style exclusive),
+  `arr[::2]` / `arr[::-1]` (step / reverse),
   `s.method(args)`.
 - Spread: `*xs` inside lists / funccall args.
 
