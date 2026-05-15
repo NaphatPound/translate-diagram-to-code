@@ -418,3 +418,49 @@ _PRIMARY = {
 for _name, _p in _PRIMARY.items():
     if _name in VERBS:
         VERBS[_name].primary_arg = _p
+
+
+# ============================================================
+# Reference rendering (used by `flow doc` and `flow gen --include-doc`)
+# ============================================================
+
+
+def _signature(spec: "VerbSpec") -> str:
+    parts = []
+    for a, desc in spec.args.items():
+        hint = desc.split(" ")[0] if desc else a
+        parts.append(f"{a}=<{hint}>")
+    sig = " ".join(parts)
+    if spec.returns:
+        sig = (sig + " -> name").lstrip()
+    return sig
+
+
+def verb_reference(compact: bool = False) -> str:
+    """Render the verb registry as a human/LLM-readable reference.
+
+    `compact=True` produces one line per verb, no headings — suitable for
+    inclusion in an LLM system prompt without burning a lot of tokens.
+    """
+    by_cat: Dict[str, List[VerbSpec]] = {}
+    cat_order: List[str] = []
+    for spec in VERBS.values():
+        if spec.category not in by_cat:
+            cat_order.append(spec.category)
+            by_cat[spec.category] = []
+        by_cat[spec.category].append(spec)
+
+    if compact:
+        lines = []
+        for cat in cat_order:
+            for spec in by_cat[cat]:
+                lines.append(f"{spec.name:10} {_signature(spec)}")
+        return "\n".join(lines)
+
+    out: List[str] = []
+    for cat in cat_order:
+        out.append(f"## {cat}")
+        for spec in by_cat[cat]:
+            out.append(f"  {spec.name:10} {_signature(spec):42}  {spec.summary}")
+        out.append("")
+    return "\n".join(out)

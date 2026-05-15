@@ -300,61 +300,36 @@ def cmd_doc(args):
     """Print a concise verb reference, generated from the live verb registry.
 
     Useful for:
-      - LLM context priming (pipe into your prompt)
+      - LLM context priming (pipe into your prompt, or use `flow gen --include-doc`)
       - Human quick-reference when writing Flow by hand
 
     `--compact` collapses each verb to a single line. Otherwise prints a
     grouped reference with a short syntax preamble.
     """
-    from .verbs import VERBS
+    from .verbs import verb_reference
     from .parser import VERB_ALIASES
 
-    # Group by category in registration order.
-    by_cat: dict = {}
-    cat_order: list = []
-    for spec in VERBS.values():
-        if spec.category not in by_cat:
-            cat_order.append(spec.category)
-            by_cat[spec.category] = []
-        by_cat[spec.category].append(spec)
-
-    def _sig(spec):
-        parts = []
-        for a, _desc in spec.args.items():
-            parts.append(f"{a}=<{_desc.split(' ')[0] if _desc else a}>")
-        sig = " ".join(parts)
-        if spec.returns:
-            sig = f"{sig} -> name".lstrip()
-        return sig
-
     if args.compact:
-        for cat in cat_order:
-            for spec in by_cat[cat]:
-                print(f"{spec.name:10} {_sig(spec)}")
+        sys.stdout.write(verb_reference(compact=True) + "\n")
         return
 
-    out = []
-    out.append("# Flow — verb reference (auto-generated)")
-    out.append("")
-    out.append("## Syntax")
-    out.append("  verb arg=value -> name      # verb call")
-    out.append("  name = expr                 # assignment")
-    out.append("  a | b | c                   # pipe (primary arg)")
-    out.append("  if cond / else / end-block by indent")
-    out.append("  each x in xs                # loop")
-    out.append("  def f x                     # function (last bare expr = return)")
-    out.append("  cond ? a : b   a ?? b   a?.b   x..y   *xs")
-    out.append("")
-    out.append("## Aliases")
-    aliases = "  " + "  ".join(f"{k}={v}" for k, v in VERB_ALIASES.items())
-    out.append(aliases)
-    out.append("")
-    for cat in cat_order:
-        out.append(f"## {cat}")
-        for spec in by_cat[cat]:
-            out.append(f"  {spec.name:10} {_sig(spec):42}  {spec.summary}")
-        out.append("")
-    sys.stdout.write("\n".join(out) + "\n")
+    head = [
+        "# Flow — verb reference (auto-generated)",
+        "",
+        "## Syntax",
+        "  verb arg=value -> name      # verb call",
+        "  name = expr                 # assignment",
+        "  a | b | c                   # pipe (primary arg)",
+        "  if cond / else / end-block by indent",
+        "  each x in xs                # loop",
+        "  def f x                     # function (last bare expr = return)",
+        "  cond ? a : b   a ?? b   a?.b   x..y   *xs",
+        "",
+        "## Aliases",
+        "  " + "  ".join(f"{k}={v}" for k, v in VERB_ALIASES.items()),
+        "",
+    ]
+    sys.stdout.write("\n".join(head) + "\n" + verb_reference(compact=False) + "\n")
 
 
 def cmd_render(args):
@@ -439,6 +414,9 @@ def main():
                     help="list cached entries and exit (no LLM call)")
     pg.add_argument("--cache-clear", action="store_true",
                     help="wipe the disk cache and exit")
+    pg.add_argument("--include-doc", action="store_true",
+                    help="append the compact verb registry to the system prompt "
+                         "(~2K extra chars; helps avoid hallucinated verb names)")
     pg.set_defaults(func=cmd_gen)
 
     pv = sub.add_parser("review", help="compile + run + ask a big LLM to judge correctness")

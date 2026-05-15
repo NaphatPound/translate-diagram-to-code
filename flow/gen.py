@@ -115,12 +115,17 @@ def _load_text(name: str) -> str:
     return p.read_text(encoding="utf-8")
 
 
-def _build_messages(user_request: str, prompt: str = "full") -> List[dict]:
+def _build_messages(user_request: str, prompt: str = "full",
+                    include_doc: bool = False) -> List[dict]:
     """Build the chat-completions message list.
 
     `prompt`:
       "full"    — system.md + few_shot.md  (default, ~5K chars)
       "minimal" — minimal.md only          (~1.7K chars, for tiny LLMs)
+
+    `include_doc` appends the live verb registry (compact form, ~2K chars)
+    so the model sees every legal verb + signature. Recommended when the
+    request may need verbs that aren't in the few-shot examples.
     """
     if prompt == "minimal":
         system = _load_text("minimal.md") or _DEFAULT_SYSTEM
@@ -129,6 +134,9 @@ def _build_messages(user_request: str, prompt: str = "full") -> List[dict]:
         few_shot = _load_text("few_shot.md")
         if few_shot:
             system = system + "\n\n" + few_shot
+    if include_doc:
+        from .verbs import verb_reference
+        system = system + "\n\n## Full verb list\n" + verb_reference(compact=True)
     return [
         {"role": "system", "content": system},
         {"role": "user", "content": user_request},
@@ -203,6 +211,7 @@ def generate(
     prompt: str = "full",
     rounds: int = 1,
     cache: bool = False,
+    include_doc: bool = False,
 ) -> str:
     """Generate Flow code from a natural-language request, with self-correction.
 
@@ -233,6 +242,7 @@ def generate(
         out = _generate_best_of_n(
             request, cfg=cfg, retries=retries, verbose=verbose,
             polish=polish, prompt=prompt, rounds=rounds,
+            include_doc=include_doc,
         )
         if cache:
             data = _cache_load()
@@ -240,7 +250,7 @@ def generate(
             _cache_save(data)
         return out
     cfg = cfg or LLMConfig()
-    messages = _build_messages(request, prompt=prompt)
+    messages = _build_messages(request, prompt=prompt, include_doc=include_doc)
 
     last_error = None
     last_code = ""
@@ -311,6 +321,7 @@ def _generate_best_of_n(
     polish: bool,
     prompt: str,
     rounds: int,
+    include_doc: bool = False,
 ) -> str:
     """Run `generate()` N times and return the shortest valid candidate."""
     candidates: list = []
@@ -322,6 +333,7 @@ def _generate_best_of_n(
             out = generate(
                 request, cfg=cfg, retries=retries, verbose=verbose,
                 polish=polish, prompt=prompt, rounds=1,
+                include_doc=include_doc,
             )
             candidates.append(out)
         except LLMError as e:
@@ -374,6 +386,7 @@ def cli_main(args) -> None:
             prompt=getattr(args, "prompt", "full"),
             rounds=getattr(args, "rounds", 1),
             cache=getattr(args, "cache", False),
+            include_doc=getattr(args, "include_doc", False),
         )
     except LLMError as e:
         print(f"ERROR: {e}", file=sys.stderr)
