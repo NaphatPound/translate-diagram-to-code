@@ -28,7 +28,7 @@ from typing import List, Optional, Union, Tuple, Any
 # ============================================================
 
 Value = Union["StringLit", "NumberLit", "BoolLit", "Name", "FuncCall", "BinOp", "UnaryOp", "ListLit", "DictLit", "Ternary", "Range", "FString", "MethodCall", "IndexAccess"]
-Stmt = Union["Call", "AssignStmt", "IfStmt", "EachStmt", "RepeatStmt", "WhenStmt", "TryStmt"]
+Stmt = Union["Call", "AssignStmt", "IfStmt", "EachStmt", "RepeatStmt", "WhenStmt", "TryStmt", "BreakStmt", "ContinueStmt"]
 
 
 @dataclass
@@ -210,6 +210,18 @@ class TryStmt:
 
 
 @dataclass
+class BreakStmt:
+    line: int
+    kind: str = "break"
+
+
+@dataclass
+class ContinueStmt:
+    line: int
+    kind: str = "continue"
+
+
+@dataclass
 class Program:
     body: List[Stmt]
     kind: str = "program"
@@ -233,7 +245,8 @@ class ParseError(Exception):
 # Tokenizer
 # ============================================================
 
-KEYWORDS = {"if", "else", "each", "in", "repeat", "when", "as", "try", "catch",
+KEYWORDS = {"if", "else", "unless", "each", "in", "repeat", "when", "as",
+            "try", "catch", "break", "continue",
             "and", "or", "not", "true", "false"}
 
 # Single-letter aliases for the most common verbs. The parser substitutes
@@ -450,6 +463,12 @@ class _Parser:
             return self._parse_when(base_indent)
         if first.kind == "KW_TRY":
             return self._parse_try(base_indent)
+        if first.kind == "KW_UNLESS":
+            return self._parse_unless(base_indent)
+        if first.kind == "KW_BREAK":
+            return self._parse_break_continue(line, BreakStmt, "break")
+        if first.kind == "KW_CONTINUE":
+            return self._parse_break_continue(line, ContinueStmt, "continue")
         if first.kind == "KW_ELSE":
             raise ParseError("'else' without matching 'if'", line.line_no, 1)
         if first.kind == "WORD":
@@ -497,10 +516,14 @@ class _Parser:
             calls.append(call)
             if i >= len(toks):
                 break
-            # Postfix-if: ` ... if <cond>` at the tail wraps everything in IfStmt.
-            if toks[i].kind == "KW_IF":
+            # Postfix-if / postfix-unless: ` ... if <cond>` or ` ... unless <cond>`
+            # at the tail wraps everything in IfStmt.
+            if toks[i].kind in ("KW_IF", "KW_UNLESS"):
+                is_unless = (toks[i].kind == "KW_UNLESS")
                 i += 1
                 postfix_if_cond, i = self._parse_expr(toks, i, line.line_no)
+                if is_unless:
+                    postfix_if_cond = UnaryOp("not", postfix_if_cond)
                 if i < len(toks):
                     raise ParseError(
                         f"unexpected token after postfix-if: {toks[i].value!r}",
@@ -555,8 +578,8 @@ class _Parser:
             value, i = self._parse_expr(toks, i, line_no)
             args.append(Arg("<pos>", value))
 
-        # Named args + optional ->name; stop at PIPE or postfix-if.
-        while i < len(toks) and toks[i].kind not in ("PIPE", "KW_IF"):
+        # Named args + optional ->name; stop at PIPE or postfix-if/unless.
+        while i < len(toks) and toks[i].kind not in ("PIPE", "KW_IF", "KW_UNLESS"):
             t = toks[i]
             if t.kind == "ARROW":
                 if i + 1 >= len(toks):
@@ -569,7 +592,7 @@ class _Parser:
                     )
                 out = name_tok.value
                 i += 2
-                if i < len(toks) and toks[i].kind not in ("PIPE", "KW_IF"):
+                if i < len(toks) and toks[i].kind not in ("PIPE", "KW_IF", "KW_UNLESS"):
                     extra = toks[i]
                     raise ParseError(
                         f"unexpected token after output name: {extra.value!r}",
@@ -923,6 +946,44 @@ class _Parser:
         self.idx += 1
         body, _ = self._parse_block(base_indent + 1)
         return RepeatStmt(count, body, line.line_no, var=var)
+
+    def _parse_break_continue(self, line: _Line, ctor, name: str):
+        """Parse `break` / `continue`, optionally followed by `if cond` or
+        `unless cond` (postfix conditional)."""
+        toks = line.tokens
+        self.idx += 1
+        stmt = ctor(line=line.line_no)
+        if len(toks) == 1:
+            return stmt
+        kw = toks[1].kind
+        if kw not in ("KW_IF", "KW_UNLESS"):
+            raise ParseError(
+                f"'{name}' must be alone or followed by 'if/unless <cond>'",
+                toks[1].line, toks[1].col,
+            )
+        cond, i = self._parse_expr(toks, 2, line.line_no)
+        if i != len(toks):
+            raise ParseError(
+                f"unexpected token after postfix conditional: {toks[i].value!r}",
+                toks[i].line, toks[i].col,
+            )
+        if kw == "KW_UNLESS":
+            cond = UnaryOp("not", cond)
+        return IfStmt(cond=cond, then=[stmt], else_=None, line=line.line_no)
+
+    def _parse_unless(self, base_indent: int) -> IfStmt:
+        """`unless cond` ≡ `if !cond`. Desugars to an IfStmt at parse time."""
+        line = self.lines[self.idx]
+        toks = line.tokens
+        cond, i = self._parse_expr(toks, 1, line.line_no)
+        if i != len(toks):
+            raise ParseError(f"unexpected token in 'unless': {toks[i].value!r}",
+                             toks[i].line, toks[i].col)
+        self.idx += 1
+        then_body, _ = self._parse_block(base_indent + 1)
+        # No else for unless; keep semantics simple.
+        return IfStmt(cond=UnaryOp("not", cond), then=then_body,
+                      else_=None, line=line.line_no)
 
     def _parse_try(self, base_indent: int) -> TryStmt:
         line = self.lines[self.idx]

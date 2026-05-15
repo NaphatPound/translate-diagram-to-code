@@ -18,6 +18,7 @@ from typing import List
 
 from .parser import (
     Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhenStmt, TryStmt,
+    BreakStmt, ContinueStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, Arg,
     ListLit, DictLit, Ternary, Range, FString, MethodCall, IndexAccess,
 )
@@ -90,6 +91,12 @@ def _emit_stmt(stmt, depth: int, out: List[str], usage: dict) -> None:
         head = "catch" + (f" {stmt.catch_var}" if stmt.catch_var else "")
         out.append(_INDENT * depth + head)
         _emit_block(stmt.catch_body, depth + 1, out, usage)
+        return
+    if isinstance(stmt, BreakStmt):
+        out.append(_INDENT * depth + "break")
+        return
+    if isinstance(stmt, ContinueStmt):
+        out.append(_INDENT * depth + "continue")
         return
     raise ValueError(f"unknown statement: {type(stmt).__name__}")
 

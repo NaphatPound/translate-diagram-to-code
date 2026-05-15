@@ -20,6 +20,7 @@ from typing import List, Set
 
 from .parser import (
     Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhenStmt, TryStmt,
+    BreakStmt, ContinueStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, Arg,
     ListLit, DictLit, Ternary, Range, FString, MethodCall, IndexAccess,
 )
@@ -177,6 +178,10 @@ class _Compiler:
             self.emit_when(stmt)
         elif isinstance(stmt, TryStmt):
             self.emit_try(stmt)
+        elif isinstance(stmt, BreakStmt):
+            self._emit("break" if self.lang != "bash" else "break")
+        elif isinstance(stmt, ContinueStmt):
+            self._emit("continue" if self.lang != "bash" else "continue")
         else:
             raise CompileError(f"unknown statement type: {type(stmt).__name__}")
 

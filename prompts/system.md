@@ -116,6 +116,17 @@ follow these rules exactly. The parser is strict; deviations will fail.
           p f"failed: {e}"
     Compiles to native try/except (Python), try/catch (JS), defer/recover
     (Go), match-on-Result (Rust), subshell+`|| handler` (Bash).
+28. **`break` / `continue`** — loop control. Both stand alone or accept a
+    postfix `if`/`unless` condition:
+        each i in 1..10
+          break if i > 5
+          continue unless i % 2 == 0
+          p i
+29. **`unless cond`** — sugar for `if !cond`. Block form opens a body;
+    postfix form wraps a single statement:
+        unless found
+          p "missing"
+        p "empty" unless items
 
 ## Verb categories (you may only use these verbs)
 
