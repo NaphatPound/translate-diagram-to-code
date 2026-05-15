@@ -20,7 +20,7 @@ from typing import List, Set
 
 from .parser import (
     Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhileStmt, WhenStmt, TryStmt,
-    BreakStmt, ContinueStmt,
+    BreakStmt, ContinueStmt, DefStmt, ReturnStmt, ExprStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, Arg,
     ListLit, DictLit, Ternary, Range, FString, MethodCall, IndexAccess,
 )
@@ -184,8 +184,71 @@ class _Compiler:
             self._emit("break" if self.lang != "bash" else "break")
         elif isinstance(stmt, ContinueStmt):
             self._emit("continue" if self.lang != "bash" else "continue")
+        elif isinstance(stmt, DefStmt):
+            self.emit_def(stmt)
+        elif isinstance(stmt, ReturnStmt):
+            self.emit_return(stmt)
+        elif isinstance(stmt, ExprStmt):
+            self.emit_expr_stmt(stmt)
         else:
             raise CompileError(f"unknown statement type: {type(stmt).__name__}")
+
+    def emit_def(self, stmt: DefStmt) -> None:
+        params_str = ", ".join(stmt.params)
+        if self.lang == "python":
+            self._emit(f"def {stmt.name}({params_str}):")
+        elif self.lang == "js":
+            self._emit(f"function {stmt.name}({params_str}) {{")
+        elif self.lang == "go":
+            params_typed = ", ".join(f"{p} any" for p in stmt.params)
+            self._emit(f"func {stmt.name}({params_typed}) any {{")
+        elif self.lang == "rust":
+            params_typed = ", ".join(f"{p}: impl std::fmt::Debug" for p in stmt.params)
+            self._emit(f"fn {stmt.name}({params_typed}) {{")
+        elif self.lang == "bash":
+            self._emit(f"{stmt.name}() {{")
+            # Bash positional args are $1, $2, ...; bind each to the param name.
+            for j, p in enumerate(stmt.params, start=1):
+                self._block_open()
+                self._emit(f"local {p}=\"${j}\"")
+                self.indent -= 1
+        # Bring params into scope while we emit the body.
+        prev_scope = self.scope.copy()
+        for p in stmt.params:
+            self.scope.add(p)
+        # Also register the function name so calls to it parse as variable refs
+        # rather than string-literal barewords.
+        self.scope.add(stmt.name)
+        self._block_open()
+        for s in stmt.body:
+            self.emit_stmt(s)
+        # Restore scope (but keep the function name).
+        self.scope = prev_scope
+        self.scope.add(stmt.name)
+        if self.lang == "bash":
+            self.indent -= 1
+            self._emit("}")
+        else:
+            self._block_close()
+
+    def emit_return(self, stmt: ReturnStmt) -> None:
+        if stmt.value is None:
+            self._emit("return" if self.lang != "bash" else "return")
+            return
+        src = self._render_value(stmt.value)
+        if self.lang == "bash":
+            self._emit(f"echo {src}; return")
+        else:
+            self._emit(f"return {src}" + (";" if self.lang in ("js", "go", "rust") else ""))
+
+    def emit_expr_stmt(self, stmt: ExprStmt) -> None:
+        src = self._render_value(stmt.value)
+        if self.lang in ("js", "rust"):
+            self._emit(f"{src};")
+        elif self.lang == "go":
+            self._emit(f"_ = {src}")
+        else:
+            self._emit(src)
 
     def emit_try(self, stmt: TryStmt) -> None:
         var = stmt.catch_var or "_e"

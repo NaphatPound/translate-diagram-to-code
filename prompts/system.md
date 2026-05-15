@@ -145,6 +145,20 @@ follow these rules exactly. The parser is strict; deviations will fail.
     otherwise `b`. Compiles to native `??` in JS/Rust, ternary in Python,
     IIFE in Go, `${var:-default}` in Bash:
         display = name ?? "anonymous"
+34. **User-defined functions** `def name p1 p2 ...` + indented body, with
+    `return [value]` for the result:
+        def double x
+          return x * 2
+
+        def greet name
+          p f"hi, {name}"
+
+        p double(5)        # → 10
+        greet("alice")     # statement: NO space between name and (
+
+    `f(x)` (no space) is a funccall statement; `f (x)` (with space) is a
+    verb-call with a parenthesized positional value. Use `()` to invoke a
+    user-defined function.
 
 ## Verb categories (you may only use these verbs)
 

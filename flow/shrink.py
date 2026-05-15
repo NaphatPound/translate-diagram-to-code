@@ -32,6 +32,7 @@ from typing import List, Optional
 from . import parse
 from .parser import (
     Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhileStmt, WhenStmt, TryStmt,
+    DefStmt, ReturnStmt, ExprStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, ListLit, DictLit,
     Ternary, Range, FString, MethodCall, IndexAccess, Arg,
 )
@@ -80,6 +81,11 @@ def _shrink_block(body):
         if isinstance(stmt, TryStmt):
             stmt.try_body = _shrink_block(stmt.try_body)
             stmt.catch_body = _shrink_block(stmt.catch_body)
+            new.append(stmt)
+            i += 1
+            continue
+        if isinstance(stmt, DefStmt):
+            stmt.body = _shrink_block(stmt.body)
             new.append(stmt)
             i += 1
             continue
@@ -196,6 +202,8 @@ def _walk_all(body):
         elif isinstance(s, TryStmt):
             yield from _walk_all(s.try_body)
             yield from _walk_all(s.catch_body)
+        elif isinstance(s, DefStmt):
+            yield from _walk_all(s.body)
 
 
 def _is_safe_to_inline(value) -> bool:
@@ -252,6 +260,13 @@ def _count_in_body(body, counts) -> None:
         elif isinstance(s, TryStmt):
             _count_in_body(s.try_body, counts)
             _count_in_body(s.catch_body, counts)
+        elif isinstance(s, DefStmt):
+            _count_in_body(s.body, counts)
+        elif isinstance(s, ReturnStmt):
+            if s.value is not None:
+                _count_in_value(s.value, counts)
+        elif isinstance(s, ExprStmt):
+            _count_in_value(s.value, counts)
 
 
 def _count_in_value(value, counts) -> None:
@@ -325,6 +340,13 @@ def _replace_and_drop(body, inlines):
         elif isinstance(stmt, TryStmt):
             stmt.try_body = _replace_and_drop(stmt.try_body, inlines)
             stmt.catch_body = _replace_and_drop(stmt.catch_body, inlines)
+        elif isinstance(stmt, DefStmt):
+            stmt.body = _replace_and_drop(stmt.body, inlines)
+        elif isinstance(stmt, ReturnStmt):
+            if stmt.value is not None:
+                stmt.value = _replace_value(stmt.value, inlines)
+        elif isinstance(stmt, ExprStmt):
+            stmt.value = _replace_value(stmt.value, inlines)
         new.append(stmt)
     return new
 

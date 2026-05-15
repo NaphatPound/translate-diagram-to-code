@@ -28,7 +28,7 @@ from typing import List, Optional, Union, Tuple, Any
 # ============================================================
 
 Value = Union["StringLit", "NumberLit", "BoolLit", "Name", "FuncCall", "BinOp", "UnaryOp", "ListLit", "DictLit", "Ternary", "Range", "FString", "MethodCall", "IndexAccess"]
-Stmt = Union["Call", "AssignStmt", "IfStmt", "EachStmt", "RepeatStmt", "WhileStmt", "WhenStmt", "TryStmt", "BreakStmt", "ContinueStmt"]
+Stmt = Union["Call", "AssignStmt", "IfStmt", "EachStmt", "RepeatStmt", "WhileStmt", "WhenStmt", "TryStmt", "BreakStmt", "ContinueStmt", "DefStmt", "ReturnStmt", "ExprStmt"]
 
 
 @dataclass
@@ -230,6 +230,33 @@ class ContinueStmt:
 
 
 @dataclass
+class DefStmt:
+    """User-defined function: `def name p1 p2 ... ` + indented body."""
+    name: str
+    params: List[str]
+    body: List[Stmt]
+    line: int
+    kind: str = "def"
+
+
+@dataclass
+class ReturnStmt:
+    value: Optional[Value]
+    line: int
+    kind: str = "return"
+
+
+@dataclass
+class ExprStmt:
+    """A statement that's just an expression evaluated for side effect.
+    Produced when the line starts with `WORD (` — i.e., a funccall used
+    where we'd otherwise expect a verb statement."""
+    value: Value
+    line: int
+    kind: str = "expr"
+
+
+@dataclass
 class Program:
     body: List[Stmt]
     kind: str = "program"
@@ -254,7 +281,7 @@ class ParseError(Exception):
 # ============================================================
 
 KEYWORDS = {"if", "else", "unless", "each", "in", "repeat", "while", "when", "as",
-            "try", "catch", "break", "continue",
+            "try", "catch", "break", "continue", "def", "return",
             "and", "or", "not", "true", "false"}
 
 # Single-letter aliases for the most common verbs. The parser substitutes
@@ -481,6 +508,10 @@ class _Parser:
             return self._parse_break_continue(line, BreakStmt, "break")
         if first.kind == "KW_CONTINUE":
             return self._parse_break_continue(line, ContinueStmt, "continue")
+        if first.kind == "KW_DEF":
+            return self._parse_def(base_indent)
+        if first.kind == "KW_RETURN":
+            return self._parse_return(line)
         if first.kind == "KW_ELSE":
             raise ParseError("'else' without matching 'if'", line.line_no, 1)
         if first.kind == "WORD":
@@ -492,6 +523,12 @@ class _Parser:
             # Compound assignment: `name += expr` → `name = name + expr`.
             if (len(toks) >= 3 and toks[1].kind == "COMPOUND"):
                 return self._parse_compound_assign(line)
+            # Funccall as statement: `name(args)` (NO space before `(`) — for
+            # side-effect calls of user-defined functions. With a space,
+            # `p (x)` reads as verb-with-positional-value instead.
+            if (len(toks) >= 2 and toks[1].kind == "LPAREN"
+                    and toks[1].col == toks[0].col + len(toks[0].value)):
+                return self._parse_expr_stmt(line)
             return self._parse_pipeline(line)
         raise ParseError(
             f"expected verb or keyword, got {first.value!r}", first.line, first.col
@@ -985,6 +1022,57 @@ class _Parser:
         self.idx += 1
         body, _ = self._parse_block(base_indent + 1)
         return RepeatStmt(count, body, line.line_no, var=var)
+
+    def _parse_def(self, base_indent: int) -> DefStmt:
+        """`def name p1 p2 ...` followed by an indented body."""
+        line = self.lines[self.idx]
+        toks = line.tokens
+        if len(toks) < 2:
+            raise ParseError("'def' needs a name: def <name> [params...]",
+                             line.line_no, 1)
+        name_tok = toks[1]
+        if name_tok.kind != "WORD" or not _is_ident(name_tok.value):
+            raise ParseError(
+                f"function name must be a plain identifier (got {name_tok.value!r})",
+                name_tok.line, name_tok.col,
+            )
+        name = name_tok.value
+        params: List[str] = []
+        for t in toks[2:]:
+            if t.kind != "WORD" or not _is_ident(t.value):
+                raise ParseError(
+                    f"def param must be a plain identifier (got {t.value!r})",
+                    t.line, t.col,
+                )
+            params.append(t.value)
+        self.idx += 1
+        body, _ = self._parse_block(base_indent + 1)
+        return DefStmt(name=name, params=params, body=body, line=line.line_no)
+
+    def _parse_return(self, line: _Line) -> ReturnStmt:
+        toks = line.tokens
+        if len(toks) == 1:
+            self.idx += 1
+            return ReturnStmt(value=None, line=line.line_no)
+        value, i = self._parse_expr(toks, 1, line.line_no)
+        if i != len(toks):
+            raise ParseError(
+                f"unexpected token after return value: {toks[i].value!r}",
+                toks[i].line, toks[i].col,
+            )
+        self.idx += 1
+        return ReturnStmt(value=value, line=line.line_no)
+
+    def _parse_expr_stmt(self, line: _Line) -> ExprStmt:
+        toks = line.tokens
+        value, i = self._parse_expr(toks, 0, line.line_no)
+        if i != len(toks):
+            raise ParseError(
+                f"unexpected token after expression: {toks[i].value!r}",
+                toks[i].line, toks[i].col,
+            )
+        self.idx += 1
+        return ExprStmt(value=value, line=line.line_no)
 
     def _parse_break_continue(self, line: _Line, ctor, name: str):
         """Parse `break` / `continue`, optionally followed by `if cond` or
