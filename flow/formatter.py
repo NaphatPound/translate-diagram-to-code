@@ -17,7 +17,7 @@ import re
 from typing import List
 
 from .parser import (
-    Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhenStmt, TryStmt,
+    Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhileStmt, WhenStmt, TryStmt,
     BreakStmt, ContinueStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, Arg,
     ListLit, DictLit, Ternary, Range, FString, MethodCall, IndexAccess,
@@ -78,6 +78,10 @@ def _emit_stmt(stmt, depth: int, out: List[str], usage: dict) -> None:
         if stmt.var:
             head += f" as {stmt.var}"
         out.append(_INDENT * depth + head)
+        _emit_block(stmt.body, depth + 1, out, usage)
+        return
+    if isinstance(stmt, WhileStmt):
+        out.append(f"{_INDENT * depth}while {_fmt_value(stmt.cond)}")
         _emit_block(stmt.body, depth + 1, out, usage)
         return
     if isinstance(stmt, WhenStmt):
@@ -201,6 +205,9 @@ def _count_in_block(body, counts):
         elif isinstance(stmt, WhenStmt):
             for a in stmt.args:
                 _count_in_value(a, counts)
+            _count_in_block(stmt.body, counts)
+        elif isinstance(stmt, WhileStmt):
+            _count_in_value(stmt.cond, counts)
             _count_in_block(stmt.body, counts)
         elif isinstance(stmt, TryStmt):
             _count_in_block(stmt.try_body, counts)

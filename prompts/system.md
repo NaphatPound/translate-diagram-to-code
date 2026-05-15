@@ -127,6 +127,15 @@ follow these rules exactly. The parser is strict; deviations will fail.
         unless found
           p "missing"
         p "empty" unless items
+30. **`while cond`** — loop that runs the body while the condition holds:
+        i = 0
+        while i < 5
+          p i
+          i += 1
+31. **Compound assignment** — `+=`, `-=`, `*=`, `/=` desugar to
+    `name = name op rhs`. Same chars as in Python/JS/C-family languages.
+        total += 1
+        scale *= 0.5
 
 ## Verb categories (you may only use these verbs)
 

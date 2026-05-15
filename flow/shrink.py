@@ -31,7 +31,7 @@ from typing import List, Optional
 
 from . import parse
 from .parser import (
-    Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhenStmt, TryStmt,
+    Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhileStmt, WhenStmt, TryStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, ListLit, DictLit,
     Ternary, Range, FString, MethodCall, IndexAccess, Arg,
 )
@@ -72,7 +72,7 @@ def _shrink_block(body):
             new.append(rewritten if rewritten else stmt)
             i += 1
             continue
-        if isinstance(stmt, (EachStmt, RepeatStmt, WhenStmt)):
+        if isinstance(stmt, (EachStmt, RepeatStmt, WhileStmt, WhenStmt)):
             stmt.body = _shrink_block(stmt.body)
             new.append(stmt)
             i += 1
@@ -191,7 +191,7 @@ def _walk_all(body):
             yield from _walk_all(s.then)
             if s.else_:
                 yield from _walk_all(s.else_)
-        elif isinstance(s, (EachStmt, RepeatStmt, WhenStmt)):
+        elif isinstance(s, (EachStmt, RepeatStmt, WhileStmt, WhenStmt)):
             yield from _walk_all(s.body)
         elif isinstance(s, TryStmt):
             yield from _walk_all(s.try_body)
@@ -241,6 +241,9 @@ def _count_in_body(body, counts) -> None:
             _count_in_body(s.body, counts)
         elif isinstance(s, RepeatStmt):
             _count_in_value(s.count, counts)
+            _count_in_body(s.body, counts)
+        elif isinstance(s, WhileStmt):
+            _count_in_value(s.cond, counts)
             _count_in_body(s.body, counts)
         elif isinstance(s, WhenStmt):
             for a in s.args:
@@ -312,6 +315,9 @@ def _replace_and_drop(body, inlines):
             stmt.body = _replace_and_drop(stmt.body, inlines)
         elif isinstance(stmt, RepeatStmt):
             stmt.count = _replace_value(stmt.count, inlines)
+            stmt.body = _replace_and_drop(stmt.body, inlines)
+        elif isinstance(stmt, WhileStmt):
+            stmt.cond = _replace_value(stmt.cond, inlines)
             stmt.body = _replace_and_drop(stmt.body, inlines)
         elif isinstance(stmt, WhenStmt):
             stmt.args = [_replace_value(a, inlines) for a in stmt.args]

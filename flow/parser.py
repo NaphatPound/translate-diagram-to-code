@@ -28,7 +28,7 @@ from typing import List, Optional, Union, Tuple, Any
 # ============================================================
 
 Value = Union["StringLit", "NumberLit", "BoolLit", "Name", "FuncCall", "BinOp", "UnaryOp", "ListLit", "DictLit", "Ternary", "Range", "FString", "MethodCall", "IndexAccess"]
-Stmt = Union["Call", "AssignStmt", "IfStmt", "EachStmt", "RepeatStmt", "WhenStmt", "TryStmt", "BreakStmt", "ContinueStmt"]
+Stmt = Union["Call", "AssignStmt", "IfStmt", "EachStmt", "RepeatStmt", "WhileStmt", "WhenStmt", "TryStmt", "BreakStmt", "ContinueStmt"]
 
 
 @dataclass
@@ -191,6 +191,14 @@ class RepeatStmt:
 
 
 @dataclass
+class WhileStmt:
+    cond: Value
+    body: List[Stmt]
+    line: int
+    kind: str = "while"
+
+
+@dataclass
 class WhenStmt:
     event: str
     args: List[Value]
@@ -245,7 +253,7 @@ class ParseError(Exception):
 # Tokenizer
 # ============================================================
 
-KEYWORDS = {"if", "else", "unless", "each", "in", "repeat", "when", "as",
+KEYWORDS = {"if", "else", "unless", "each", "in", "repeat", "while", "when", "as",
             "try", "catch", "break", "continue",
             "and", "or", "not", "true", "false"}
 
@@ -270,6 +278,7 @@ TOKEN_SPEC = [
     ("STRING", r'"(?:\\.|[^"\\\n])*"'),
     ("ARROW", r"->"),
     ("CMP", r">=|<=|==|!="),
+    ("COMPOUND", r"[+\-*/]="),
     ("DOTDOT", r"\.\."),
     ("OROP", r"\|\|"),
     ("ANDOP", r"&&"),
@@ -459,6 +468,8 @@ class _Parser:
             return self._parse_each(base_indent)
         if first.kind == "KW_REPEAT":
             return self._parse_repeat(base_indent)
+        if first.kind == "KW_WHILE":
+            return self._parse_while(base_indent)
         if first.kind == "KW_WHEN":
             return self._parse_when(base_indent)
         if first.kind == "KW_TRY":
@@ -472,14 +483,41 @@ class _Parser:
         if first.kind == "KW_ELSE":
             raise ParseError("'else' without matching 'if'", line.line_no, 1)
         if first.kind == "WORD":
-            # Assignment: `name = expr`. Check that toks[1] is `=` (not `==`).
             toks = line.tokens
+            # Assignment: `name = expr`. Check that toks[1] is `=` (not `==`).
             if (len(toks) >= 3
                     and toks[1].kind == "OP" and toks[1].value == "="):
                 return self._parse_assignment(line)
+            # Compound assignment: `name += expr` → `name = name + expr`.
+            if (len(toks) >= 3 and toks[1].kind == "COMPOUND"):
+                return self._parse_compound_assign(line)
             return self._parse_pipeline(line)
         raise ParseError(
             f"expected verb or keyword, got {first.value!r}", first.line, first.col
+        )
+
+    def _parse_compound_assign(self, line: _Line) -> "AssignStmt":
+        """`name += expr` desugars to `name = name + expr`. Same for `-= *= /=`."""
+        toks = line.tokens
+        target = toks[0].value
+        if not _is_ident(target):
+            raise ParseError(
+                f"compound assignment target must be a plain identifier (got {target!r})",
+                toks[0].line, toks[0].col,
+            )
+        op_char = toks[1].value[0]  # `+=` → '+', `-=` → '-', etc.
+        rhs, i = self._parse_expr(toks, 2, line.line_no)
+        if i != len(toks):
+            extra = toks[i]
+            raise ParseError(
+                f"unexpected token after compound-assign expression: {extra.value!r}",
+                extra.line, extra.col,
+            )
+        self.idx += 1
+        return AssignStmt(
+            target=target,
+            value=BinOp(op_char, Name([target]), rhs),
+            line=line.line_no,
         )
 
     def _parse_assignment(self, line: _Line) -> "AssignStmt":
@@ -1013,6 +1051,20 @@ class _Parser:
         catch_body, _ = self._parse_block(base_indent + 1)
         return TryStmt(try_body=try_body, catch_var=catch_var,
                        catch_body=catch_body, line=line.line_no)
+
+    def _parse_while(self, base_indent: int) -> WhileStmt:
+        line = self.lines[self.idx]
+        toks = line.tokens
+        if len(toks) < 2:
+            raise ParseError("'while' needs a condition: while <expr>",
+                             line.line_no, 1)
+        cond, i = self._parse_expr(toks, 1, line.line_no)
+        if i != len(toks):
+            raise ParseError(f"unexpected token after while condition: {toks[i].value!r}",
+                             toks[i].line, toks[i].col)
+        self.idx += 1
+        body, _ = self._parse_block(base_indent + 1)
+        return WhileStmt(cond=cond, body=body, line=line.line_no)
 
     def _parse_when(self, base_indent: int) -> WhenStmt:
         line = self.lines[self.idx]

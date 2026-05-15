@@ -19,7 +19,7 @@ import re
 from typing import List, Set
 
 from .parser import (
-    Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhenStmt, TryStmt,
+    Program, Call, AssignStmt, IfStmt, EachStmt, RepeatStmt, WhileStmt, WhenStmt, TryStmt,
     BreakStmt, ContinueStmt,
     StringLit, NumberLit, BoolLit, Name, FuncCall, BinOp, UnaryOp, Arg,
     ListLit, DictLit, Ternary, Range, FString, MethodCall, IndexAccess,
@@ -174,6 +174,8 @@ class _Compiler:
             self.emit_each(stmt)
         elif isinstance(stmt, RepeatStmt):
             self.emit_repeat(stmt)
+        elif isinstance(stmt, WhileStmt):
+            self.emit_while(stmt)
         elif isinstance(stmt, WhenStmt):
             self.emit_when(stmt)
         elif isinstance(stmt, TryStmt):
@@ -506,6 +508,27 @@ class _Compiler:
             self.emit_stmt(s)
         if stmt.var and not prev_in_scope:
             self.scope.discard(stmt.var)
+        if self.lang == "bash":
+            self.indent -= 1
+            self._emit("done")
+        else:
+            self._block_close()
+
+    def emit_while(self, stmt: WhileStmt) -> None:
+        cond = self._render_value(stmt.cond)
+        if self.lang == "python":
+            self._emit(f"while {cond}:")
+        elif self.lang == "js":
+            self._emit(f"while ({cond}) {{")
+        elif self.lang == "go":
+            self._emit(f"for {cond} {{")
+        elif self.lang == "rust":
+            self._emit(f"while {cond} {{")
+        elif self.lang == "bash":
+            self._emit(f"while (( {cond} )); do")
+        self._block_open()
+        for s in stmt.body:
+            self.emit_stmt(s)
         if self.lang == "bash":
             self.indent -= 1
             self._emit("done")
