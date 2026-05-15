@@ -65,6 +65,9 @@ follow these rules exactly. The parser is strict; deviations will fail.
         repeat 5 as i
           p i                       # 0, 1, 2, 3, 4
     Drop `as i` if you don't need the index: just `repeat 5`.
+17a. **`each k, v in dict`** — iterate dict entries with both key and value:
+        each name, age in users
+          p f"{name}: {age}"
 18. **Truthy if** for lists/strings: `if items` is true when non-empty (Python
     semantics). Use this instead of `if count(items) > 0`. JS targets compile
     differently — prefer the explicit `count(items) > 0` if you need

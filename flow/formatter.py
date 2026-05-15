@@ -67,7 +67,9 @@ def _emit_stmt(stmt, depth: int, out: List[str], usage: dict) -> None:
             _emit_block(stmt.else_, depth + 1, out, usage)
         return
     if isinstance(stmt, EachStmt):
-        out.append(f"{_INDENT * depth}each {stmt.var} in {_fmt_value(stmt.iterable)}")
+        vars_part = (f"{stmt.key_var}, {stmt.var}"
+                     if stmt.key_var else stmt.var)
+        out.append(f"{_INDENT * depth}each {vars_part} in {_fmt_value(stmt.iterable)}")
         _emit_block(stmt.body, depth + 1, out, usage)
         return
     if isinstance(stmt, RepeatStmt):

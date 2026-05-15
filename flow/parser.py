@@ -177,6 +177,7 @@ class EachStmt:
     iterable: Value
     body: List[Stmt]
     line: int
+    key_var: Optional[str] = None   # `each k, v in dict` → key_var=k, var=v
     kind: str = "each"
 
 
@@ -849,21 +850,33 @@ class _Parser:
         line = self.lines[self.idx]
         toks = line.tokens
         if len(toks) < 4:
-            raise ParseError("'each' needs the form: each <name> in <value>", line.line_no, 1)
+            raise ParseError("'each' needs: each <name>[, <name>] in <value>",
+                             line.line_no, 1)
         if toks[1].kind != "WORD" or not _is_ident(toks[1].value):
             raise ParseError(f"expected variable name after 'each', got {toks[1].value!r}",
                              toks[1].line, toks[1].col)
-        if toks[2].kind != "KW_IN":
-            raise ParseError(f"expected 'in' after each-variable, got {toks[2].value!r}",
-                             toks[2].line, toks[2].col)
         var = toks[1].value
-        iterable, i = self._parse_expr(toks, 3, line.line_no)
+        key_var: Optional[str] = None
+        i = 2
+        # Optional second var: `each k, v in dict`
+        if toks[i].kind == "COMMA":
+            if i + 1 >= len(toks) or toks[i + 1].kind != "WORD" or not _is_ident(toks[i + 1].value):
+                raise ParseError("expected second variable name after ','",
+                                 toks[i].line, toks[i].col)
+            key_var = var
+            var = toks[i + 1].value
+            i += 2
+        if toks[i].kind != "KW_IN":
+            raise ParseError(f"expected 'in' after each-variable, got {toks[i].value!r}",
+                             toks[i].line, toks[i].col)
+        iterable, i = self._parse_expr(toks, i + 1, line.line_no)
         if i != len(toks):
             raise ParseError(f"unexpected token after iterable: {toks[i].value!r}",
                              toks[i].line, toks[i].col)
         self.idx += 1
         body, _ = self._parse_block(base_indent + 1)
-        return EachStmt(var, iterable, body, line.line_no)
+        return EachStmt(var=var, iterable=iterable, body=body, line=line.line_no,
+                        key_var=key_var)
 
     def _parse_repeat(self, base_indent: int) -> RepeatStmt:
         line = self.lines[self.idx]

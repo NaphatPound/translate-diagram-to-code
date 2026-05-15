@@ -431,23 +431,45 @@ class _Compiler:
 
     def emit_each(self, stmt: EachStmt) -> None:
         iter_src = self._render_value(stmt.iterable)
+        kv = stmt.key_var is not None
         if self.lang == "python":
-            self._emit(f"for {stmt.var} in {iter_src}:")
+            if kv:
+                self._emit(f"for {stmt.key_var}, {stmt.var} in ({iter_src}).items():")
+            else:
+                self._emit(f"for {stmt.var} in {iter_src}:")
         elif self.lang == "js":
-            self._emit(f"for (const {stmt.var} of {iter_src}) {{")
+            if kv:
+                self._emit(f"for (const [{stmt.key_var}, {stmt.var}] of Object.entries({iter_src})) {{")
+            else:
+                self._emit(f"for (const {stmt.var} of {iter_src}) {{")
         elif self.lang == "go":
-            self._emit(f"for _, {stmt.var} := range {iter_src} {{")
+            if kv:
+                self._emit(f"for {stmt.key_var}, {stmt.var} := range {iter_src} {{")
+            else:
+                self._emit(f"for _, {stmt.var} := range {iter_src} {{")
         elif self.lang == "rust":
-            self._emit(f"for {stmt.var} in {iter_src} {{")
+            if kv:
+                self._emit(f"for ({stmt.key_var}, {stmt.var}) in ({iter_src}).iter() {{")
+            else:
+                self._emit(f"for {stmt.var} in {iter_src} {{")
         elif self.lang == "bash":
-            self._emit(f"for {stmt.var} in \"${{{iter_src}[@]}}\"; do")
-        previously_in_scope = stmt.var in self.scope
+            # Bash assoc-array iteration is messy; emit a best-effort `for k in "${!d[@]}"`.
+            if kv:
+                self._emit(f"for {stmt.key_var} in \"${{!{iter_src.lstrip('$')}[@]}}\"; do {stmt.var}=\"${{{iter_src.lstrip('$')}[${stmt.key_var}]}}\"")
+            else:
+                self._emit(f"for {stmt.var} in \"${{{iter_src.lstrip('$')}[@]}}\"; do")
+        previously = stmt.var in self.scope
+        prev_k = stmt.key_var in self.scope if kv else False
         self.scope.add(stmt.var)
+        if kv:
+            self.scope.add(stmt.key_var)
         self._block_open()
         for s in stmt.body:
             self.emit_stmt(s)
-        if not previously_in_scope:
+        if not previously:
             self.scope.discard(stmt.var)
+        if kv and not prev_k:
+            self.scope.discard(stmt.key_var)
         if self.lang == "bash":
             self.indent -= 1
             self._emit("done")
