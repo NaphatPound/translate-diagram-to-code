@@ -556,7 +556,19 @@ class _Parser:
             if (len(toks) >= 2 and toks[1].kind == "LPAREN"
                     and toks[1].col == toks[0].col + len(toks[0].value)):
                 return self._parse_expr_stmt(line)
+            # Bare expression statement: `x + 1`, `x.method()`, etc. Trigger
+            # when toks[1] is an operator-like token so it can't be a verb
+            # call (a verb call would have `arg=value` or `->`).
+            if len(toks) >= 2 and _is_expr_continuation(toks[1]):
+                return self._parse_expr_stmt(line)
             return self._parse_pipeline(line)
+        # Non-WORD starts that are still valid as bare expression statements.
+        if first.kind in ("NUMBER", "STRING", "FSTRING", "LBRACK", "LBRACE",
+                          "LPAREN", "BANG", "KW_TRUE", "KW_FALSE"):
+            return self._parse_expr_stmt(line)
+        if first.kind == "OP" and first.value == "-":
+            # Unary-minus prefix: `-x` as bare expression.
+            return self._parse_expr_stmt(line)
         raise ParseError(
             f"expected verb or keyword, got {first.value!r}", first.line, first.col
         )
@@ -1129,6 +1141,11 @@ class _Parser:
             params.append((pname, default))
         self.idx += 1
         body, _ = self._parse_block(base_indent + 1)
+        # Implicit return: if the last statement is a bare expression, wrap
+        # it as ReturnStmt so callers get the value back without writing
+        # `return` explicitly.
+        if body and isinstance(body[-1], ExprStmt):
+            body[-1] = ReturnStmt(value=body[-1].value, line=body[-1].line)
         return DefStmt(name=name, params=params, body=body, line=line.line_no)
 
     def _parse_return(self, line: _Line) -> ReturnStmt:
@@ -1263,6 +1280,27 @@ class _Parser:
 
 
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _is_expr_continuation(tok) -> bool:
+    """True if `tok` can only appear as part of an expression after a value,
+    such that `WORD tok ...` couldn't possibly be a verb call.
+
+    Used to detect bare expression statements like `x.method()`, `x == 1`,
+    `x + 1`, `x ?? y`. This enables implicit return: `def f x\\n  x * 2`.
+
+    Carefully excluded:
+      - LBRACK: `p [1, 2]` is a verb call with a positional list value.
+      - OP `-`: `verb -10` is a verb call with a negative positional value
+        (unary minus prefix). Subtraction with `-` must use explicit `return`.
+    """
+    if tok.kind in ("DOT", "OPTDOT", "DOTDOT",
+                    "CMP", "NULLCOAL", "ANDOP", "OROP", "QMARK",
+                    "KW_AND", "KW_OR"):
+        return True
+    if tok.kind == "OP" and tok.value in ("+", "*", "/", "%", "<", ">"):
+        return True
+    return False
 
 
 def _looks_like_multi_assign(toks) -> bool:

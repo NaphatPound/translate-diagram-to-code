@@ -170,6 +170,16 @@ follow these rules exactly. The parser is strict; deviations will fail.
           p f"{greeting}, {name}"
         greet("alice")                    # uses default → "hi, alice"
         greet("alice", "yo")              # → "yo, alice"
+35a. **Implicit return** — if the last statement in a `def` body is a bare
+     expression (binary op, method call, comparison, f-string, etc.), it's
+     automatically wrapped in a `return`. Use explicit `return` for bare
+     variable names or `arr[i]` patterns.
+         def double x
+           x * 2                          # implicit return x * 2
+         def shout s
+           s.upper()                      # implicit return s.upper()
+         def in_range x lo hi
+           x >= lo and x <= hi            # implicit return of the bool
 36. **Spread `*xs`** inside list literals and funccall args expands an
     iterable into the surrounding collection / argument list:
         combined = [*xs, *ys, 0]
