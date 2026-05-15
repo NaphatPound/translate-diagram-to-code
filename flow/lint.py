@@ -285,9 +285,10 @@ def _check_def(stmt: DefStmt, out: List[LintWarning]) -> None:
 
 
 def _check_if(stmt: IfStmt, out: List[LintWarning]) -> None:
-    """Two if-related lints:
+    """If-related lints:
       1. `if !cond` block (multi-stmt) → suggest `unless cond` block form.
       2. Chain of 3+ if/elif `var == LIT` comparisons → suggest `match var`.
+      3. Mirror `if/else return` → one return with a ternary.
     """
     cond = stmt.cond
     if (isinstance(cond, UnaryOp) and cond.op == "not"
@@ -307,6 +308,19 @@ def _check_if(stmt: IfStmt, out: List[LintWarning]) -> None:
             f"chain of {depth} `if/elif {var_name} == ...` comparisons can be a `match` statement",
             f"match {var_name}\n    case PAT\n      ...",
         ))
+
+    if stmt.else_ and len(stmt.then) == 1 and len(stmt.else_) == 1:
+        a, b = stmt.then[0], stmt.else_[0]
+        if (isinstance(a, ReturnStmt) and isinstance(b, ReturnStmt)
+                and a.value is not None and b.value is not None):
+            cs = _value_to_src(stmt.cond)
+            ts = _value_to_src(a.value)
+            es = _value_to_src(b.value)
+            out.append(LintWarning(
+                stmt.line,
+                "mirror `if/else return` can be one `return` with a ternary",
+                f"return {cs} ? {ts} : {es}",
+            ))
 
 
 def _detect_if_chain(stmt: IfStmt):

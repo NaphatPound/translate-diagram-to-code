@@ -75,6 +75,36 @@ class TestLintInsideControl(unittest.TestCase):
         self.assertEqual(len(ws), 1)
 
 
+class TestLintMirrorReturn(unittest.TestCase):
+
+    def test_suggests_ternary_for_mirror_returns(self):
+        src = (
+            "def f x\n"
+            "  if x > 0\n"
+            "    return \"pos\"\n"
+            "  else\n"
+            "    return \"neg\"\n"
+        )
+        ws = lint_source(src)
+        msgs = [w.message for w in ws]
+        sugs = [w.suggestion for w in ws]
+        self.assertTrue(any("mirror" in m for m in msgs))
+        self.assertTrue(any("?" in s and ":" in s and "return" in s for s in sugs))
+
+    def test_no_warning_for_asymmetric_branches(self):
+        # then has 2 stmts → not a mirror.
+        src = (
+            "def f x\n"
+            "  if x > 0\n"
+            "    log = 1\n"
+            "    return 1\n"
+            "  else\n"
+            "    return 2\n"
+        )
+        ws = lint_source(src)
+        self.assertFalse(any("mirror" in w.message for w in ws))
+
+
 class TestLintNoFalsePositives(unittest.TestCase):
 
     def test_compact_code_clean(self):

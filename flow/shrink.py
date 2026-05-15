@@ -145,22 +145,30 @@ def _try_call_to_assign(call: Call) -> Optional[AssignStmt]:
     return None
 
 
-def _try_mirror_if_to_ternary(stmt: IfStmt) -> Optional[AssignStmt]:
-    """`if cond: X=a / else: X=b` → `X = cond ? a : b`."""
+def _try_mirror_if_to_ternary(stmt: IfStmt):
+    """Mirror-if collapse to a single ternary expression.
+
+    - `if cond: X=a / else: X=b`            → `X = cond ? a : b`
+    - `if cond: return a / else: return b`  → `return cond ? a : b`
+    """
     if not stmt.else_:
         return None
     if len(stmt.then) != 1 or len(stmt.else_) != 1:
         return None
     a, b = stmt.then[0], stmt.else_[0]
-    if not (isinstance(a, AssignStmt) and isinstance(b, AssignStmt)):
-        return None
-    if a.target != b.target:
-        return None
-    return AssignStmt(
-        target=a.target,
-        value=Ternary(cond=stmt.cond, then=a.value, else_=b.value),
-        line=stmt.line,
-    )
+    if isinstance(a, AssignStmt) and isinstance(b, AssignStmt) and a.target == b.target:
+        return AssignStmt(
+            target=a.target,
+            value=Ternary(cond=stmt.cond, then=a.value, else_=b.value),
+            line=stmt.line,
+        )
+    if (isinstance(a, ReturnStmt) and isinstance(b, ReturnStmt)
+            and a.value is not None and b.value is not None):
+        return ReturnStmt(
+            value=Ternary(cond=stmt.cond, then=a.value, else_=b.value),
+            line=stmt.line,
+        )
+    return None
 
 
 # ---------- helpers ----------

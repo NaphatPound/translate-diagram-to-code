@@ -123,6 +123,66 @@ class TestMirrorIfToTernary(unittest.TestCase):
         self.assertIn("if ", out)
 
 
+class TestMirrorReturnToTernary(unittest.TestCase):
+    """`if cond / return a / else / return b` → `return cond ? a : b`,
+    which combined with implicit-return becomes just the bare ternary."""
+
+    def test_mirror_return_collapses(self):
+        before = (
+            "def f x\n"
+            "  if x > 0\n"
+            "    return \"pos\"\n"
+            "  else\n"
+            "    return \"neg\"\n"
+            "p f(1)"
+        )
+        out = shrink_source(before)
+        self.assertIn("?", out)
+        self.assertIn(":", out)
+        self.assertNotIn("if x > 0", out)
+        # With implicit-return, both returns drop entirely.
+        self.assertNotIn("return", out)
+
+    def test_mirror_return_preserves_semantics(self):
+        before = (
+            "def label x\n"
+            "  if x > 0\n"
+            "    return \"pos\"\n"
+            "  else\n"
+            "    return \"neg\"\n"
+            "p label(5)\n"
+            "p label(-1)"
+        )
+        self.assertTrue(_semantically_same(before, shrink_source(before)))
+
+    def test_no_else_not_rewritten(self):
+        # `if / return` without else (early-return pattern) must stay intact.
+        before = (
+            "def f x\n"
+            "  if x < 0\n"
+            "    return 0\n"
+            "  x * 2\n"
+            "p f(3)"
+        )
+        out = shrink_source(before)
+        self.assertIn("if ", out)
+        self.assertIn("return 0", out)
+
+    def test_one_branch_unbalanced_not_rewritten(self):
+        # then branch has 2 stmts → not a mirror; leave the if alone.
+        before = (
+            "def f x\n"
+            "  if x > 0\n"
+            "    log = \"pos\"\n"
+            "    return 1\n"
+            "  else\n"
+            "    return 2\n"
+            "p f(0)"
+        )
+        out = shrink_source(before)
+        self.assertIn("if ", out)
+
+
 class TestNoOpOnCompactInput(unittest.TestCase):
 
     def test_already_compact_unchanged_semantically(self):
